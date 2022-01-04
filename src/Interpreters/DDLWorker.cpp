@@ -203,6 +203,9 @@ void DDLWorker::startup()
     cleanup_thread = ThreadFromGlobalPool(&DDLWorker::runCleanupThread, this);
 }
 
+// 通过设置stop_flag为true来标记停止。
+// 如果之前stop_flag未设置（即为false），则会触发队列更新事件和清理事件，然后等待main_thread和cleanup_thread线程完成。
+// 最后重置worker_pool，关闭线程池和清理资源。
 void DDLWorker::shutdown()
 {
     bool prev_stop_flag = stop_flag.exchange(true);
@@ -221,7 +224,8 @@ DDLWorker::~DDLWorker()
     DDLWorker::shutdown();
 }
 
-
+// 尝试获取当前的ZooKeeper连接实例。
+// 通过使用std::lock_guard确保线程安全地访问current_zookeeper成员。
 ZooKeeperPtr DDLWorker::tryGetZooKeeper() const
 {
     std::lock_guard lock(zookeeper_mutex);
