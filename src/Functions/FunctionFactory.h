@@ -34,7 +34,7 @@ public:
     void registerFunction(const std::string & name, CaseSensitiveness case_sensitiveness = CaseSensitive)
     {
 
-        if constexpr (std::is_base_of_v<IFunction, Function>)
+        if constexpr (std::is_base_of_v<IFunction, Function>)// 判断IFunction是否为Function的基类
             registerFunction(name, &adaptFunctionToOverloadResolver<Function>, case_sensitiveness);
         else
             registerFunction(name, &Function::create, case_sensitiveness);

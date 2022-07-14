@@ -135,7 +135,11 @@ static bool jemallocOptionEnabled(const char *name)
 static bool jemallocOptionEnabled(const char *) { return 0; }
 #endif
 
-
+/**
+ * 服务启动时调用
+ * @param argc 驱动参数个数
+ * @param argv 所有启动参数
+ */
 int mainEntryClickHouseServer(int argc, char ** argv)
 {
     DB::Server app;
@@ -166,6 +170,7 @@ int mainEntryClickHouseServer(int argc, char ** argv)
             app.shouldSetupWatchdog(argv[0]);
     }
 
+    // 所有服务最终都是通过其run方法启动
     try
     {
         return app.run(argc, argv);
@@ -466,6 +471,9 @@ int Server::main(const std::vector<std::string> & /*args*/)
 
     MainThreadStatus::getInstance();
 
+    /**
+     * 将各个IFunction子类对象装入AggregateFunctionFactory的内部map容器中
+     */
     registerFunctions();
     registerAggregateFunctions();
     registerTableFunctions();
@@ -490,6 +498,9 @@ int Server::main(const std::vector<std::string> & /*args*/)
 
     /** Context contains all that query execution is dependent:
       *  settings, available functions, data types, aggregate functions, databases, ...
+      *
+      *  创建 分片上下文对象（之所以是分片的上下文，是因为ck中一个独立节点就可以看作是一个shared分片）
+      *  里面包含了配置、聚合函数等各种信息
       */
     auto shared_context = Context::createShared();
     global_context = Context::createGlobal(shared_context.get());
@@ -504,6 +515,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
 
     bool has_zookeeper = config().has("zookeeper");
 
+    //初始化zk
     zkutil::ZooKeeperNodeCache main_config_zk_node_cache([&] { return global_context->getZooKeeper(); });
     zkutil::EventPtr main_config_zk_changed_event = std::make_shared<Poco::Event>();
     if (loaded_config.has_zk_includes)
@@ -524,6 +536,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
 #if defined(OS_LINUX)
     std::string executable_path = getExecutablePath();
 
+    // 校验文件完整性
     if (!executable_path.empty())
     {
         /// Integrity check based on checksum of the executable code.
@@ -615,6 +628,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
     }
 #endif
 
+    // 初始化其他配置
     global_context->setRemoteHostFilter(config());
 
     std::string path = getCanonicalPath(config().getString("path", DBMS_DEFAULT_PATH));
@@ -1158,6 +1172,9 @@ int Server::main(const std::vector<std::string> & /*args*/)
     LOG_INFO(log, "TaskStats is not implemented for this OS. IO accounting will be disabled.");
 #endif
 
+    /**
+     * socket相关逻辑
+     */
     auto servers = std::make_shared<std::vector<ProtocolServerAdapter>>();
     {
         /// This object will periodically calculate some metrics.
@@ -1165,6 +1182,8 @@ int Server::main(const std::vector<std::string> & /*args*/)
             global_context, config().getUInt("asynchronous_metrics_update_period_s", 1), servers_to_start_before_tables, servers);
         attachSystemTablesAsync(*DatabaseCatalog::instance().getSystemDatabase(), async_metrics);
 
+        // 从配置文件中获取监听地址（一般配置文件中为通配符::，接受所有地址的请求）
+        // 然后根据各个功能的暴露端口，创建socketserver，并装入servers容器
         for (const auto & listen_host : listen_hosts)
         {
             /// HTTP
@@ -1370,6 +1389,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
             });
         }
 
+        // 至少得暴露tcp或http连接的端口
         if (servers->empty())
              throw Exception("No servers started (add valid listen_host and 'tcp_port' or 'http_port' to configuration file.)",
                 ErrorCodes::NO_ELEMENTS_IN_CONFIG);
@@ -1420,6 +1440,46 @@ int Server::main(const std::vector<std::string> & /*args*/)
                                                                      "distributed_ddl", "DDLWorker", &CurrentMetrics::MaxDDLEntryID));
         }
 
+        /**
+         * 启动所有端口的socket服务，每个socket服务都会单独分配一个线程
+         * TCPServer.run()
+         * 启动单线程负责接收socket后放入TCPServerDispatcher.enqueue(const StreamSocket& socket)做一些处理，最终都是放入其内部一个队列。
+         *
+         * 之后又有单独线程不断读取队列中的socket（TCPServerDispatcher::run()），并根据服务类型将其包装成各种Connection（TCPServerConnection子类）
+         * 以http请求为例，最后socket会包装进HTTPServerConnection对象
+         *
+         * 然后再单独开线程执行每一个connection包装对象的run()方法（HTTPServerConnection.run()）
+         * 其中解析出request对象后会生成对应handle，通过其handleRequest方法进一步处理请求。
+         * （tcp端口请求为TCPHandler.runImpl()处理。 http请求为HTTPRequestHandler.handleRequest()的某个子类（一般情况下由HTTPHandler该子类处理））
+         *
+         * 继续以http请求为例，其handle中真正处理sql的逻辑都在其HTTPHandler.processQuery() -> executeQuery()方法中
+         * executeQuery() =================================================================================================================
+         * 从socket中获取readbuffer，再获取其首字符地址pos。之后依次执行以下逻辑：
+         * (1)将sql字符串中每个字符解析成Tokens（executeQuery.cpp 》 executeQueryImpl() 》 ast = parseQuery()）
+         * ck中每次查询sql中每个字符都会被包装成一个Token对象，
+         * （Lexer::nextTokenImpl() ：遍历整个sql的每一个字符，将每一个字符都转换成对应Token对象）
+         *
+         * (2)将Tokens转换成ast语法树（executeQuery.cpp 》 executeQueryImpl() 》 ast = parseQuery()）
+         * ParserQuery::parseImpl(Tokens, ast, expected)
+         * 所有的查询都会进上面这个总解析器，
+         * 然后再进一步分流，依次放进各个解析器中，直到解析成功。
+         * 如最常用的select解析器为例：ParserSelectWithUnionQuery::parseImpl()
+         *
+         * (3)创建interpreter解释器（executeQuery.cpp 》 executeQueryImpl() 》 auto interpreter = InterpreterFactory::get()）
+         * 解释器负责根据ast语法树，创建整个查询过程。
+         * 每一种sql其解析器也不同，该工厂根据ast语法树的种类，创建对应解析器。
+         * 以普通select ast为例，对应解析器为：InterpreterSelectQuery。
+         * 创建解释器的构造方法中，会依次创建初始化以下功能：
+         * 1、对ast语法树进行优化，包括提取公共子查询、where下移以提前过滤等，
+         * 最终将优化后的ast树包装并返回。
+         * 该对象中还会包含此次查询所用的所有聚合器等查询中的信息
+         * 2、创建“analyzer解析器”（query_analyzer = std::make_unique<SelectQueryExpressionAnalyzer>）
+         * 将优化后的ast树传入其中，
+         * 该解析器会将ast解析成具体要做的一系列物理执行计划。
+         *
+         * (4)执行interpreter解释器（executeQuery.cpp 》 executeQueryImpl() 》 res = interpreter->execute()）
+         * 本质上就是根据该解析器初始化时构建的物理执行计划，来执行这些物理计划
+         */
         for (auto & server : *servers)
             server.start();
         LOG_INFO(log, "Ready for connections.");

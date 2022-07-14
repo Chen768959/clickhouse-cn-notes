@@ -73,7 +73,7 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
         || show_grants_p.parse(pos, query, expected)
         || show_privileges_p.parse(pos, query, expected);
 
-    if (!parsed)
+    if (!parsed)// 所有解析器都解析不通
         return false;
 
     /// FIXME: try to prettify this cast using `as<>()`

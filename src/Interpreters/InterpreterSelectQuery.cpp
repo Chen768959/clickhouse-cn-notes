@@ -381,6 +381,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
         if (view)
             view->replaceWithSubquery(getSelectQuery(), view_table, metadata_snapshot);
 
+        // 对ast进行优化，包括提取公共子查询、where下移以提前过滤等，最终将优化后的ast树包装并返回
         syntax_analyzer_result = TreeRewriter(context).analyzeSelect(
             query_ptr,
             TreeRewriterResult(source_header.getNamesAndTypesList(), storage, metadata_snapshot),
@@ -899,7 +900,7 @@ static bool hasWithTotalsInAnySubqueryInFromClause(const ASTSelectQuery & query)
     return false;
 }
 
-
+// 根据ast对象解析并制定查询计划并装入query_plan对象
 void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInputStreamPtr & prepared_input, std::optional<Pipe> prepared_pipe)
 {
     /** Streams of data. When the query is executed in parallel, we have several data streams.
@@ -913,6 +914,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
      */
 
     /// Now we will compose block streams that perform the necessary actions.
+    // 获取当前解析器初始化的时候传入的ast对象
     auto & query = getSelectQuery();
     const Settings & settings = context->getSettingsRef();
     auto & expressions = analysis_result;
@@ -941,7 +943,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
         query_info.projection->aggregate_final = aggregate_final;
     }
 
-    if (options.only_analyze)
+    if (options.only_analyze)// explain语句，只进行分析而不进行实际查询
     {
         auto read_nothing = std::make_unique<ReadNothingStep>(source_header);
         query_plan.addStep(std::move(read_nothing));
@@ -984,6 +986,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
     }
     else
     {
+        // 读取内容“非”表或子查询
         if (prepared_input)
         {
             auto prepared_source_step
@@ -1009,6 +1012,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             to_aggregation_stage = true;
 
         /// Read the data from Storage. from_stage - to what stage the request was completed in Storage.
+        // 从本地存储读取数据
         executeFetchColumns(from_stage, query_plan);
 
         LOG_TRACE(log, "{} -> {}", QueryProcessingStage::toString(from_stage), QueryProcessingStage::toString(options.to_stage));
@@ -1732,8 +1736,10 @@ void InterpreterSelectQuery::addPrewhereAliasActions()
     }
 }
 
+// 根据该解释器初始化时生成的物理计划，来执行读取原始数据的物理计划
 void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum processing_stage, QueryPlan & query_plan)
 {
+    // 获取优化过后的ast树
     auto & query = getSelectQuery();
     const Settings & settings = context->getSettingsRef();
 
@@ -1814,6 +1820,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
             settings.max_columns_to_read);
 
     /// General limit for the number of threads.
+    // 从配置文件中找到max_threads参数配置（该参数应该是用来决定启动多少条线程来并发去读本地文件）
     size_t max_threads_execute_query = settings.max_threads;
 
     /** With distributed query processing, almost no computations are done in the threads,
@@ -1823,6 +1830,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
      *  To simultaneously query more remote servers,
      *  instead of max_threads, max_distributed_connections is used.
      */
+    // 使用max_distributed_connections参数来决定并发访问子节点的数量。
     bool is_remote = false;
     if (storage && storage->isRemote())
     {
@@ -1864,6 +1872,8 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
     {
         /// Prepared input.
     }
+    // （当前解释器初始化时设置）
+    // 数据源为子查询
     else if (interpreter_subquery)
     {
         /// Subquery.

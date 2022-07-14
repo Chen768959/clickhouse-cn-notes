@@ -23,7 +23,13 @@
 namespace DB
 {
 
-
+/**
+ *
+ * @param pos Token迭代器，其中每个Token都是一个sql字符
+ * @param node ast语法树，解析结果会放进该树中
+ * @param expected 1
+ * @return 是否解析成功
+ */
 bool ParserQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ParserQueryWithOutput query_with_output_p(end);
@@ -41,7 +47,18 @@ bool ParserQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     ParserSetRoleQuery set_role_p;
     ParserExternalDDLQuery external_ddl_p;
 
-    bool res = query_with_output_p.parse(pos, node, expected)
+    /**
+     * 依次调用以下解析器的parseImpl()方法，尝试解析sql。
+     * 以下解析器可大致分成两类：
+     * 1、有结果的sql，query_with_output_p
+     * 2、剩下的都是无结果的sql类型
+     *
+     * 以最常用的有结果类sql解析器展开：
+     * 其内部还有各种具体的sql解析器，如select解析器、show解析器等
+     * 这些解析器第一步都会“列出当前查询可能会出现的关键字”
+     *
+     */
+    bool res = query_with_output_p.parse(pos, node, expected) // 有结果的输出
         || insert_p.parse(pos, node, expected)
         || use_p.parse(pos, node, expected)
         || set_role_p.parse(pos, node, expected)

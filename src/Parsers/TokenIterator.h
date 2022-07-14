@@ -23,6 +23,9 @@ private:
 public:
     Tokens(const char * begin, const char * end, size_t max_query_size = 0) : lexer(begin, end, max_query_size) {}
 
+    /**
+     * 重载数组访问操作符
+     */
     const Token & operator[] (size_t index)
     {
         while (true)

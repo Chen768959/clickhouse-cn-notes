@@ -91,13 +91,15 @@ namespace ErrorCodes
     extern const int UNKNOWN_TYPE_OF_QUERY;
 }
 
-
+// 根据ast语法树类型创建对应解析器
 std::unique_ptr<IInterpreter> InterpreterFactory::get(ASTPtr & query, ContextMutablePtr context, const SelectQueryOptions & options)
 {
+    // 开启链路跟踪，获取出traceid和spanid
     OpenTelemetrySpanHolder span("InterpreterFactory::get()");
 
     ProfileEvents::increment(ProfileEvents::Query);
 
+    // 创建ast对应解析器
     if (query->as<ASTSelectQuery>())
     {
         /// This is internal part of ASTSelectWithUnionQuery.

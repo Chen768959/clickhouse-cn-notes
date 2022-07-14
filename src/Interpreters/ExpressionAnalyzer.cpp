@@ -132,7 +132,7 @@ ExpressionAnalyzer::~ExpressionAnalyzer() = default;
 
 ExpressionAnalyzer::ExpressionAnalyzer(
     const ASTPtr & query_,
-    const TreeRewriterResultPtr & syntax_analyzer_result_,
+    const TreeRewriterResultPtr & syntax_analyzer_result_,// 被优化重写后的ast树
     ContextPtr context_,
     size_t subquery_depth_,
     bool do_global,

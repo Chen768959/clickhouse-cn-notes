@@ -66,7 +66,7 @@ struct ExpressionAnalyzerData
     bool has_aggregation = false;
     NamesAndTypesList aggregation_keys;
     bool has_const_aggregation_keys = false;
-    AggregateDescriptions aggregate_descriptions;
+    AggregateDescriptions aggregate_descriptions;// analyzer解析器创建时解析出各个聚合器并put进来（ExpressionAnalyzer::makeAggregateDescriptions(ActionsDAGPtr & actions)）
 
     WindowDescriptions window_descriptions;
     NamesAndTypesList window_columns;
@@ -279,6 +279,9 @@ class SelectQueryExpressionAnalyzer : public ExpressionAnalyzer
 public:
     friend struct ExpressionAnalysisResult;
 
+    /**
+     * 在创建该解析器时，其ExpressionAnalyzer对象初始化时还会解析出所有aggregate聚合器信息
+     */
     SelectQueryExpressionAnalyzer(
         const ASTPtr & query_,
         const TreeRewriterResultPtr & syntax_analyzer_result_,

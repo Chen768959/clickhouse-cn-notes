@@ -222,7 +222,7 @@ std::string getUnmatchedParenthesesErrorMessage(
 
 }
 
-
+// 将sql转换成token队列，再解析成ast语法树
 ASTPtr tryParseQuery(
     IParser & parser,
     const char * & _out_query_end, /* also query begin as input parameter */
@@ -235,9 +235,14 @@ ASTPtr tryParseQuery(
     size_t max_parser_depth)
 {
     const char * query_begin = _out_query_end;
+    // 将begin_pos查询sql的首指针放入tokens中
     Tokens tokens(query_begin, all_queries_end, max_query_size);
+    // 创建token_iterator迭代器
+    // token_iterator迭代器每次可迭代Token对象
+    // token_iterator将从tokens中借助lexer的逻辑，从begin_pos指针开始，遍历所有sql字符，并这些字符都包装成Token对象，再返回出这些Token对象。
     IParser::Pos token_iterator(tokens, max_parser_depth);
 
+    // 如果sql的首字符为空，或者是分号，则表示此次查询没有sql
     if (token_iterator->isEnd()
         || token_iterator->type == TokenType::Semicolon)
     {

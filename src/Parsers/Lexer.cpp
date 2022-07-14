@@ -71,8 +71,10 @@ Token Lexer::nextTokenImpl()
         return Token(TokenType::Comment, token_begin, pos);
     };
 
+    // 获取当前pos位上的字符，并根据类型包装成对应Token对象返回，同时++pos
     switch (*pos)
     {
+        // 以下符号都作为Whitespace（空白）token
         case ' ': [[fallthrough]];
         case '\t': [[fallthrough]];
         case '\n': [[fallthrough]];

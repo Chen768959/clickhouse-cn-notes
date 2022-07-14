@@ -349,19 +349,26 @@ int main(int argc_, char ** argv_)
     ///  will work only after additional call of this function.
     updatePHDRCache();
 
+    // 将入参装入vector容器
     std::vector<char *> argv(argv_, argv_ + argc_);
 
     /// Print a basic help if nothing was matched
     MainFunc main_func = printHelp;
 
+    // 遍历clickhouse_applications（pair数组）（application为引用类型）
     for (auto & application : clickhouse_applications)
     {
-        if (isClickhouseApp(application.first, argv))
+        // first：启动ck时传入的参数，如client、server等；second：对应要启动的类
+        if (isClickhouseApp(application.first, argv))// 一次只能启动一个服务，在入参中找到后跳出遍历
         {
             main_func = application.second;
             break;
         }
     }
 
+    /**
+     * 启动入参对应的服务，以server服务为例，进入以下发方法
+     * mainEntryClickHouseServer
+     */
     return main_func(static_cast<int>(argv.size()), argv.data());
 }

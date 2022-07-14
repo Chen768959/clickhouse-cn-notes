@@ -340,13 +340,13 @@ static void setQuerySpecificSettings(ASTPtr & ast, ContextMutablePtr context)
 }
 
 static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
-    const char * begin,
-    const char * end,
-    ContextMutablePtr context,
-    bool internal,
-    QueryProcessingStage::Enum stage,
-    bool has_query_tail,
-    ReadBuffer * istr)
+    const char * begin,// istr的起始position
+    const char * end,// istr的结束position
+    ContextMutablePtr context, // 全局上下文与此次sql中的设置
+    bool internal,// false
+    QueryProcessingStage::Enum stage,// QueryProcessingStage::Complete
+    bool has_query_tail,// 此次查询sql的总长度是否超过max_query_size设置
+    ReadBuffer * istr)// socket输入流
 {
     const auto current_time = std::chrono::system_clock::now();
 
@@ -357,6 +357,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     // thus should not set initial_query_start_time, because it might introduce data race. It's also
     // possible to have unset initial_query_start_time for non-internal and non-initial queries. For
     // example, the query is from an initiator that is running an old version of clickhouse.
+    // 为此次查询设置初始查询时间
     if (!internal && client_info.initial_query_start_time == 0)
     {
         client_info.initial_query_start_time = time_in_seconds(current_time);
@@ -368,6 +369,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     assert(internal || CurrentThread::get().getQueryContext()->getCurrentQueryId() == CurrentThread::getQueryId());
 #endif
 
+    // users.xml中的setting配置
     const Settings & settings = context->getSettingsRef();
 
     ASTPtr ast;
@@ -384,10 +386,15 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         ParserQuery parser(end);
 
         /// TODO: parser should fail early when max_query_size limit is reached.
+        /**
+         * ==============================================================================================================================
+         * 将sql的每个字符转换成token队列，再解析成ast语法树
+         */
         ast = parseQuery(parser, begin, end, "", max_query_size, settings.max_parser_depth);
 
         /// Interpret SETTINGS clauses as early as possible (before invoking the corresponding interpreter),
         /// to allow settings to take effect.
+        // 如果ast语法树是select查询，则先把setting配置获取出来并放入全局上下文中
         if (const auto * select_query = ast->as<ASTSelectQuery>())
         {
             if (auto new_settings = select_query->settings())
@@ -453,6 +460,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     setQuerySpecificSettings(ast, context);
 
     /// Copy query into string. It will be written to log and presented in processlist. If an INSERT query, string will not include data to insertion.
+    // 拷贝查询sql字符串，后续会将此sql写入日志
     String query(begin, query_end);
     BlockIO res;
 
@@ -522,6 +530,21 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
             /// reset Input callbacks if query is not INSERT SELECT
             context->resetInputCallbacks();
 
+        /**
+         * =========================================================================================================================
+         * 创建解释器。
+         * 解释器负责根据ast语法树，创建整个查询过程。
+         * 每一种sql其解析器也不同，该工厂根据ast语法树的种类，创建对应解析器。
+         * 以普通select ast为例，对应解析器为：InterpreterSelectQuery。
+         *
+         * 创建解释器的构造方法中，会依次创建初始化以下功能：
+         * 1、对ast语法树进行优化，包括提取公共子查询、where下移以提前过滤等，
+         * 最终将优化后的ast树包装并返回。
+         * 该对象中还会包含此次查询所用的所有聚合器等查询中的信息
+         * 2、创建“analyzer解析器”（query_analyzer = std::make_unique<SelectQueryExpressionAnalyzer>）
+         * 将优化后的ast树传入其中，
+         * 该解析器会将ast解析成具体要做的一系列物理执行计划。
+         */
         auto interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));
 
         std::shared_ptr<const EnabledQuota> quota;
@@ -551,7 +574,13 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         }
 
         {
+            // 获取生成当前trace_id和span_id
             OpenTelemetrySpanHolder span("IInterpreter::execute()");
+            /**
+             * 执行interpreter解释器，根据ast优化后树生成并执行物理计划
+             * （1）执行从本地磁盘读取数据计划（executeFetchColumns(from_stage, query_plan)）
+             *
+             */
             res = interpreter->execute();
         }
 
@@ -943,7 +972,13 @@ BlockIO executeQuery(
     return res;
 }
 
-
+/**
+ * HTTPHandler请求时传参
+ * @param istr socket输入流
+ * @param ostr socket输出流
+ * @param allow_into_outfile false
+ * @param context 全局上下文与此次sql自带的参数
+ */
 void executeQuery(
     ReadBuffer & istr,
     WriteBuffer & ostr,
@@ -962,10 +997,17 @@ void executeQuery(
 
     size_t max_query_size = context->getSettingsRef().max_query_size;
 
+    /**
+     * 获取查询sql的输入流的起始与结束的读取位置
+     * c++中读取这个buffer实际上只需要起始位置即可，
+     * buffer底层为char数组，知道其起始指针，后续所有内容都是连续地址，只需要指针指向的地址++即可获取所有内容，
+     * 所以后续各处读取buffer时实际上并没有将buffer对象传入各处，而是直接传入的pos指针，不断读取其位置上的各个字符，之后再自增移向下一字符
+     */
     bool may_have_tail;
     if (istr.buffer().end() - istr.position() > static_cast<ssize_t>(max_query_size))
     {
         /// If remaining buffer space in 'istr' is enough to parse query up to 'max_query_size' bytes, then parse inplace.
+        // 直接计算地址
         begin = istr.position();
         end = istr.buffer().end();
         istr.position() += end - begin;
@@ -990,6 +1032,9 @@ void executeQuery(
     ASTPtr ast;
     BlockIO streams;
 
+    /**
+     * 真正执行sql解析的逻辑
+     */
     std::tie(ast, streams) = executeQueryImpl(begin, end, context, false, QueryProcessingStage::Complete, may_have_tail, &istr);
 
     auto & pipeline = streams.pipeline;

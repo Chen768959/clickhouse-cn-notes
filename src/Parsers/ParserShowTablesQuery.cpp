@@ -17,6 +17,7 @@ namespace DB
 
 bool ParserShowTablesQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    // SHOW查询中，可能会出现的关键字
     ParserKeyword s_show("SHOW");
     ParserKeyword s_temporary("TEMPORARY");
     ParserKeyword s_tables("TABLES");
