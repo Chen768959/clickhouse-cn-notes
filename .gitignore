@@ -1,0 +1,11 @@
+# IntelliJ project files
+.idea
+*.iml
+out
+gen
+/tests/
+/cmake/
+/contrib/
+/.github/
+/cmake-build-debug/
+/cmake-build-release-19216821331/
