@@ -1744,6 +1744,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
     const Settings & settings = context->getSettingsRef();
 
     /// Optimization for trivial query like SELECT count() FROM table.
+    // 是否存在count()查询，且该count()查询是否满足优化前提条件
     bool optimize_trivial_count =
         syntax_analyzer_result->optimize_trivial_count
         && (settings.max_parallel_replicas <= 1)
@@ -1755,23 +1756,28 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         && (query_analyzer->aggregates().size() == 1)
         && typeid_cast<const AggregateFunctionCount *>(query_analyzer->aggregates()[0].function.get());
 
+    // 首先判断当前是否是count聚合查询，且是否符合优化条件，符合的话进入以下优化查询逻辑，最后直接给出结果
     if (optimize_trivial_count)
     {
+        // 在创建当前解析器时，就已经根据ast树解析出所有aggregateDesc并装入队列，此处获取队列中的首个aggregateDesc
         const auto & desc = query_analyzer->aggregates()[0];
+        // 获取该聚合器对应的聚合方法接口类IAggregateFunction
         const auto & func = desc.function;
         std::optional<UInt64> num_rows{};
 
+        // 如果没有where条件，且是mergetree引擎表，则直接获取内存中的总行数值
         if (!query.prewhere() && !query.where())
         {
-            num_rows = storage->totalRows(settings);
+            num_rows = storage->totalRows(settings);//mergetree引擎表中，获取当前总行数，这个总行数是作为一个原子int存在于内存中的
         }
         else // It's possible to optimize count() given only partition predicates
-        {
+        {// 如果存在where条件，则
             SelectQueryInfo temp_query_info;
             temp_query_info.query = query_ptr;
             temp_query_info.syntax_analyzer_result = syntax_analyzer_result;
             temp_query_info.sets = query_analyzer->getPreparedSets();
 
+            // 从本地各个part文件中获获取
             num_rows = storage->totalRowsByPartitionPredicate(temp_query_info, context);
         }
 
@@ -1818,6 +1824,8 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
             "Limit for number of columns to read exceeded. Requested: {}, maximum: {}",
             required_columns.size(),
             settings.max_columns_to_read);
+
+    // 如果不符合上面的count()查询场景，则进入以下逻辑，准备并发读取磁盘文件
 
     /// General limit for the number of threads.
     // 从配置文件中找到max_threads参数配置（该参数应该是用来决定启动多少条线程来并发去读本地文件）

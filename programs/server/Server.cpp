@@ -1466,6 +1466,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
          * 如最常用的select解析器为例：ParserSelectWithUnionQuery::parseImpl()
          *
          * (3)创建interpreter解释器（executeQuery.cpp 》 executeQueryImpl() 》 auto interpreter = InterpreterFactory::get()）
+         * todo interpreter具体如何创建interpreter解释器，interpreter解释器构造方法中又是如何初始化各个关键对象的
          * 解释器负责根据ast语法树，创建整个查询过程。
          * 每一种sql其解析器也不同，该工厂根据ast语法树的种类，创建对应解析器。
          * 以普通select ast为例，对应解析器为：InterpreterSelectQuery。
@@ -1478,6 +1479,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
          * 该解析器会将ast解析成具体要做的一系列物理执行计划。
          *
          * (4)执行interpreter解释器（executeQuery.cpp 》 executeQueryImpl() 》 res = interpreter->execute()）
+         * todo storage是如何在interpreter解释器中被初始化的，不同storage子类的使用时机是什么？
          * 本质上就是根据该解析器初始化时构建的物理执行计划，来执行这些物理计划
          */
         for (auto & server : *servers)

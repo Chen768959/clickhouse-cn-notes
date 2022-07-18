@@ -910,6 +910,7 @@ protected:
 
     boost::iterator_range<DataPartIteratorByStateAndInfo> getDataPartsStateRange(DataPartState state) const
     {
+        // 从data_parts_by_state_and_info中找到符合state状态的part list的始末位置，并返回
         auto begin = data_parts_by_state_and_info.lower_bound(state, LessStateDataPart());
         auto end = data_parts_by_state_and_info.upper_bound(state, LessStateDataPart());
         return {begin, end};

@@ -3259,6 +3259,7 @@ MergeTreeData::DataPartsVector MergeTreeData::getDataPartsVector(
     DataPartsVector res;
     DataPartsVector buf;
     {
+        // 对当前操作的parts对象上锁
         auto lock = lockParts();
 
         for (auto state : affordable_states)
@@ -3655,6 +3656,11 @@ CompressionCodecPtr MergeTreeData::getCompressionCodecForPart(size_t part_size_c
         static_cast<double>(part_size_compressed) / getTotalActiveSizeInBytes());
 }
 
+/**
+ * 根据state查询data_parts_by_state_and_info中符合条件的part list
+ * @param affordable_states 所查询parts的类型，比如Committed指的就是提供给select语句使用的parts数据
+ * @return 本质上是返回的MergeTreeData.h中的data_parts_by_state_and_info中的连续的符合affordable_states描述的part list的始末位置
+ */
 MergeTreeData::DataParts MergeTreeData::getDataParts(const DataPartStates & affordable_states) const
 {
     DataParts res;
@@ -3662,6 +3668,7 @@ MergeTreeData::DataParts MergeTreeData::getDataParts(const DataPartStates & affo
         auto lock = lockParts();
         for (auto state : affordable_states)
         {
+            //从data_parts_by_state_and_info中找到符合state状态的part list的始末位置，并返回
             auto range = getDataPartsStateRange(state);
             res.insert(range.begin(), range.end());
         }
