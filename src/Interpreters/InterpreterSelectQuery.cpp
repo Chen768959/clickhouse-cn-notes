@@ -602,8 +602,10 @@ BlockIO InterpreterSelectQuery::execute()
 
     buildQueryPlan(query_plan);
 
+    LOG_TRACE(log, "CUSTOM_TRACE START buildQueryPipeline");
     res.pipeline = std::move(*query_plan.buildQueryPipeline(
         QueryPlanOptimizationSettings::fromContext(context), BuildQueryPipelineSettings::fromContext(context)));
+    LOG_TRACE(log, "CUSTOM_TRACE END buildQueryPipeline");
     return res;
 }
 
@@ -1013,12 +1015,14 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
 
         /// Read the data from Storage. from_stage - to what stage the request was completed in Storage.
         // 从本地存储读取数据
+        LOG_TRACE(log, "CUSTOM_TRACE START executeFetchColumns");
         executeFetchColumns(from_stage, query_plan);
+        LOG_TRACE(log, "CUSTOM_TRACE END executeFetchColumns");
 
         LOG_TRACE(log, "{} -> {}", QueryProcessingStage::toString(from_stage), QueryProcessingStage::toString(options.to_stage));
     }
 
-    if (options.to_stage > QueryProcessingStage::FetchColumns)
+    if (options.to_stage > QueryProcessingStage::FetchColumns)// 目标阶段数要大于本地磁盘存储阶段，则继续进行
     {
         auto preliminary_sort = [&]()
         {
@@ -1032,23 +1036,37 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                 && !expressions.hasHaving()
                 && !expressions.has_window)
             {
-                if (expressions.has_order_by)
+                if (expressions.has_order_by){
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）START executeOrder");
                     executeOrder(
-                        query_plan,
-                        query_info.input_order_info ? query_info.input_order_info
-                                                    : (query_info.projection ? query_info.projection->input_order_info : nullptr));
+                            query_plan,
+                            query_info.input_order_info ? query_info.input_order_info
+                                                        : (query_info.projection ? query_info.projection->input_order_info : nullptr));
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）END executeOrder");
+                }
 
-                if (expressions.has_order_by && query.limitLength())
+
+                if (expressions.has_order_by && query.limitLength()){
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）START executeDistinct");
                     executeDistinct(query_plan, false, expressions.selected_columns, true);
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）END executeDistinct");
+                }
+
 
                 if (expressions.hasLimitBy())
                 {
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）START executeLimitBy");
                     executeExpression(query_plan, expressions.before_limit_by, "Before LIMIT BY");
                     executeLimitBy(query_plan);
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）END executeLimitBy");
                 }
 
-                if (query.limitLength())
+                if (query.limitLength()){
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）START executePreLimit");
                     executePreLimit(query_plan, true);
+                    LOG_TRACE(log, "CUSTOM_TRACE （preliminary_sort）END executePreLimit");
+                }
+
             }
         };
 
@@ -1058,8 +1076,11 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                 throw Exception("Query with intermediate stage cannot have any other stages", ErrorCodes::LOGICAL_ERROR);
 
             preliminary_sort();
-            if (expressions.need_aggregate)
+            if (expressions.need_aggregate){
+                LOG_TRACE(log, "CUSTOM_TRACE （intermediate_stage）START executeMergeAggregated");
                 executeMergeAggregated(query_plan, aggregate_overflow_row, aggregate_final);
+                LOG_TRACE(log, "CUSTOM_TRACE （intermediate_stage）END executeMergeAggregated");
+            }
         }
         if (from_aggregation_stage)
         {
@@ -1157,13 +1178,18 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                 }
             }
 
-            if (!query_info.projection && expressions.hasWhere())
+            if (!query_info.projection && expressions.hasWhere()){
+                LOG_TRACE(log, "CUSTOM_TRACE （first_stage）START executeWhere");
                 executeWhere(query_plan, expressions.before_where, expressions.remove_where_filter);
+                LOG_TRACE(log, "CUSTOM_TRACE （first_stage）END executeWhere");
+            }
 
             if (expressions.need_aggregate)
             {
+                LOG_TRACE(log, "CUSTOM_TRACE （first_stage）START executeAggregation");
                 executeAggregation(
                     query_plan, expressions.before_aggregation, aggregate_overflow_row, aggregate_final, query_info.input_order_info);
+                LOG_TRACE(log, "CUSTOM_TRACE （first_stage）END executeAggregation");
                 /// We need to reset input order info, so that executeOrder can't use  it
                 query_info.input_order_info.reset();
             }
@@ -1200,15 +1226,20 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                     // now, on shards (first_stage).
                     assert(!expressions.before_window);
                     executeExpression(query_plan, expressions.before_order_by, "Before ORDER BY");
+                    LOG_TRACE(log, "CUSTOM_TRACE （first_stage）START executeDistinct");
                     executeDistinct(query_plan, true, expressions.selected_columns, true);
+                    LOG_TRACE(log, "CUSTOM_TRACE （first_stage END executeDistinct");
                 }
             }
 
             preliminary_sort();
 
             // If there is no global subqueries, we can run subqueries only when receive them on server.
-            if (!query_analyzer->hasGlobalSubqueries() && !subqueries_for_sets.empty())
+            if (!query_analyzer->hasGlobalSubqueries() && !subqueries_for_sets.empty()){
+                LOG_TRACE(log, "CUSTOM_TRACE （first_stage）START executeSubqueriesInSetsAndJoins");
                 executeSubqueriesInSetsAndJoins(query_plan, subqueries_for_sets);
+                LOG_TRACE(log, "CUSTOM_TRACE （first_stage）END executeSubqueriesInSetsAndJoins");
+            }
         }
 
         if (expressions.second_stage || from_aggregation_stage)
@@ -1220,22 +1251,33 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             else if (expressions.need_aggregate)
             {
                 /// If you need to combine aggregated results from multiple servers
-                if (!expressions.first_stage)
+                if (!expressions.first_stage){
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）START executeMergeAggregated");
                     executeMergeAggregated(query_plan, aggregate_overflow_row, aggregate_final);
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）END executeMergeAggregated");
+                }
 
                 if (!aggregate_final)
                 {
                     if (query.group_by_with_totals)
                     {
                         bool final = !query.group_by_with_rollup && !query.group_by_with_cube;
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）START executeTotalsAndHaving");
                         executeTotalsAndHaving(
                             query_plan, expressions.hasHaving(), expressions.before_having, aggregate_overflow_row, final);
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）END executeTotalsAndHaving");
                     }
 
-                    if (query.group_by_with_rollup)
+                    if (query.group_by_with_rollup){
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）START executeRollup");
                         executeRollupOrCube(query_plan, Modificator::ROLLUP);
-                    else if (query.group_by_with_cube)
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）END executeRollup");
+                    }
+                    else if (query.group_by_with_cube){
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）START executeCube");
                         executeRollupOrCube(query_plan, Modificator::CUBE);
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）END executeCube");
+                    }
 
                     if ((query.group_by_with_rollup || query.group_by_with_cube) && expressions.hasHaving())
                     {
@@ -1243,11 +1285,16 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                             throw Exception(
                                 "WITH TOTALS and WITH ROLLUP or CUBE are not supported together in presence of HAVING",
                                 ErrorCodes::NOT_IMPLEMENTED);
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）START executeHaving");
                         executeHaving(query_plan, expressions.before_having);
+                        LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）END executeHaving");
                     }
                 }
-                else if (expressions.hasHaving())
+                else if (expressions.hasHaving()){
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）START executeHaving");
                     executeHaving(query_plan, expressions.before_having);
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_agg）END executeHaving");
+                }
             }
             else if (query.group_by_with_totals || query.group_by_with_rollup || query.group_by_with_cube)
                 throw Exception("WITH TOTALS, ROLLUP or CUBE are not supported without aggregation", ErrorCodes::NOT_IMPLEMENTED);
@@ -1268,19 +1315,33 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             }
             else if (expressions.need_aggregate)
             {
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_before）START executeExpression");
                 executeExpression(query_plan, expressions.before_window,
                     "Before window functions");
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_before）END executeExpression");
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window）START executeWindow");
                 executeWindow(query_plan);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window）END executeWindow");
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_after）START executeExpression");
                 executeExpression(query_plan, expressions.before_order_by, "Before ORDER BY");
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_after）END executeExpression");
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_dist）START executeDistinct");
                 executeDistinct(query_plan, true, expressions.selected_columns, true);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_dist）END executeDistinct");
             }
             else
             {
                 if (query_analyzer->hasWindow())
                 {
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window）START executeWindow");
                     executeWindow(query_plan);
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window）END executeWindow");
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_after）START executeExpression");
                     executeExpression(query_plan, expressions.before_order_by, "Before ORDER BY");
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_after）END executeExpression");
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_dist）START executeDistinct");
                     executeDistinct(query_plan, true, expressions.selected_columns, true);
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage，window_dist）END executeDistinct");
                 }
                 else
                 {
@@ -1300,18 +1361,27 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                   * then merge the sorted streams is enough, since remote servers already did full ORDER BY.
                   */
 
-                if (from_aggregation_stage)
+                if (from_aggregation_stage){
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeMergeSorted");
                     executeMergeSorted(query_plan, "after aggregation stage for ORDER BY");
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeMergeSorted");
+                }
                 else if (!expressions.first_stage
                     && !expressions.need_aggregate
                     && !expressions.has_window
-                    && !(query.group_by_with_totals && !aggregate_final))
+                    && !(query.group_by_with_totals && !aggregate_final)){
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeMergeSorted");
                     executeMergeSorted(query_plan, "for ORDER BY, without aggregation");
-                else    /// Otherwise, just sort.
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeMergeSorted");
+                }
+                else{/// Otherwise, just sort.
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeOrder");
                     executeOrder(
-                        query_plan,
-                        query_info.input_order_info ? query_info.input_order_info
-                                                    : (query_info.projection ? query_info.projection->input_order_info : nullptr));
+                            query_plan,
+                            query_info.input_order_info ? query_info.input_order_info
+                                                        : (query_info.projection ? query_info.projection->input_order_info : nullptr));
+                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeOrder");
+                }
             }
 
             /** Optimization - if there are several sources and there is LIMIT, then first apply the preliminary LIMIT,
@@ -1342,29 +1412,43 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             bool limit_applied = false;
             if (apply_prelimit)
             {
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executePreLimit");
                 executePreLimit(query_plan, /* do_not_skip_offset= */!apply_offset);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executePreLimit");
                 limit_applied = true;
             }
 
             /** If there was more than one stream,
               * then DISTINCT needs to be performed once again after merging all streams.
               */
-            if (query.distinct)
+            if (query.distinct){
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_dist）START executeDistinct");
                 executeDistinct(query_plan, false, expressions.selected_columns, false);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_dist）END executeDistinct");
+            }
+
 
             if (expressions.hasLimitBy())
             {
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，limit_before）START executeExpression");
                 executeExpression(query_plan, expressions.before_limit_by, "Before LIMIT BY");
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，limit_before）END executeExpression");
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeLimitBy");
                 executeLimitBy(query_plan);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeLimitBy");
             }
 
+            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeWithFill");
             executeWithFill(query_plan);
+            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeWithFill");
 
             /// If we have 'WITH TIES', we need execute limit before projection,
             /// because in that case columns from 'ORDER BY' are used.
             if (query.limit_with_ties && apply_offset)
             {
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，with_ties）START executeLimit");
                 executeLimit(query_plan);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，with_ties）END executeLimit");
                 limit_applied = true;
             }
 
@@ -1373,11 +1457,15 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             if (!to_aggregation_stage)
             {
                 /// We must do projection after DISTINCT because projection may remove some columns.
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeProjection");
                 executeProjection(query_plan, expressions.final_projection);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeProjection");
             }
 
             /// Extremes are calculated before LIMIT, but after LIMIT BY. This is Ok.
+            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeExtremes");
             executeExtremes(query_plan);
+            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeExtremes");
 
             /// Limit is no longer needed if there is prelimit.
             ///
@@ -1385,16 +1473,26 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             /// since LIMIT will apply OFFSET too.
             /// This is the case for various optimizations for distributed queries,
             /// and when LIMIT cannot be applied it will be applied on the initiator anyway.
-            if (apply_limit && !limit_applied && apply_offset)
+            if (apply_limit && !limit_applied && apply_offset){
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeLimit");
                 executeLimit(query_plan);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeLimit");
+            }
 
-            if (apply_offset)
+            if (apply_offset){
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeOffset");
                 executeOffset(query_plan);
+                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeOffset");
+            }
+
         }
     }
 
-    if (!subqueries_for_sets.empty() && (expressions.hasHaving() || query_analyzer->hasGlobalSubqueries()))
+    if (!subqueries_for_sets.empty() && (expressions.hasHaving() || query_analyzer->hasGlobalSubqueries())){
+        LOG_TRACE(log, "CUSTOM_TRACE （final）START executeSubqueriesInSetsAndJoins");
         executeSubqueriesInSetsAndJoins(query_plan, subqueries_for_sets);
+        LOG_TRACE(log, "CUSTOM_TRACE （final）END executeSubqueriesInSetsAndJoins");
+    }
 }
 
 static StreamLocalLimits getLimitsForStorage(const Settings & settings, const SelectQueryOptions & options)
@@ -1777,7 +1875,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
             temp_query_info.syntax_analyzer_result = syntax_analyzer_result;
             temp_query_info.sets = query_analyzer->getPreparedSets();
 
-            // 从本地各个part文件中获获取
+            // 找到对应表的所有part，并计算其各part中符合条件的的couont量，最后再累加所有count得到本节点本表的count总量num_rows
             num_rows = storage->totalRowsByPartitionPredicate(temp_query_info, context);
         }
 
@@ -1853,6 +1951,8 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
     /** Optimization - if not specified DISTINCT, WHERE, GROUP, HAVING, ORDER, LIMIT BY, WITH TIES but LIMIT is specified, and limit + offset < max_block_size,
      *  then as the block size we will use limit + offset (not to read more from the table than requested),
      *  and also set the number of threads to 1.
+     *
+     *  limit查询优化
      */
     if (!query.distinct
         && !query.limit_with_ties
@@ -1903,6 +2003,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         interpreter_subquery->buildQueryPlan(query_plan);
         query_plan.addInterpreterContext(context);
     }
+    // 数据源为本地存储
     else if (storage)
     {
         /// Table.

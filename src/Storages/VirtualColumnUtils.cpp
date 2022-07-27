@@ -146,6 +146,7 @@ bool prepareFilterBlockWithQuery(const ASTPtr & query, ContextPtr context, Block
     block.setColumns(const_columns);
 
     bool unmodified = true;
+    //如果没有where条件，则直接返回true
     const auto & select = query->as<ASTSelectQuery &>();
     if (!select.where() && !select.prewhere())
         return unmodified;

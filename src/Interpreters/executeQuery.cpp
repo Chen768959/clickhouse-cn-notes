@@ -577,15 +577,18 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
             // 获取生成当前trace_id和span_id
             OpenTelemetrySpanHolder span("IInterpreter::execute()");
             /**
-             * 执行interpreter解释器，根据ast优化后树生成并执行物理计划
+             * 执行interpreter解释器，根据ast优化后树生成物理计划
              * （1）执行从本地磁盘读取数据计划（executeFetchColumns(from_stage, query_plan)）
              *
              */
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE start interpreter->execute()");
             res = interpreter->execute();
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE end interpreter->execute()");
         }
 
+        // 后续所有逻辑都是按照此pipeline执行
         QueryPipeline & pipeline = res.pipeline;
-        bool use_processors = pipeline.initialized();
+        bool use_processors = pipeline.initialized();// 判断pipeline是否为空，正常情况下为true
 
         if (const auto * insert_interpreter = typeid_cast<const InterpreterInsertQuery *>(&*interpreter))
         {
@@ -625,7 +628,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 });
             }
         }
-        else
+        else// pipeline为空
         {
             /// Limits on the result, the quota on the result, and also callback for progress.
             /// Limits apply only to the final result.
@@ -903,15 +906,18 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
             };
 
+
             res.finish_callback = std::move(finish_callback);
             res.exception_callback = std::move(exception_callback);
 
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE START res.in");
             if (!internal && res.in)
             {
                 WriteBufferFromOwnString msg_buf;
                 res.in->dumpTree(msg_buf);
                 LOG_DEBUG(&Poco::Logger::get("executeQuery"), "Query pipeline:\n{}", msg_buf.str());
             }
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE END res.in");
         }
     }
     catch (...)
@@ -1039,15 +1045,19 @@ void executeQuery(
 
     auto & pipeline = streams.pipeline;
 
+    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE START executeQueryImpl_after");
     try
     {
         if (streams.out)
         {
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE START executeQueryImpl_after streams.out");
             InputStreamFromASTInsertQuery in(ast, &istr, streams.out->getHeader(), context, nullptr);
             copyData(in, *streams.out);
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE END executeQueryImpl_after streams.out");
         }
         else if (streams.in)
         {
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE START executeQueryImpl_after streams.in");
             const auto * ast_query_with_output = dynamic_cast<const ASTQueryWithOutput *>(ast.get());
 
             WriteBuffer * out_buf = &ostr;
@@ -1084,9 +1094,11 @@ void executeQuery(
                     context->getClientInfo().current_query_id, out->getContentType(), format_name, DateLUT::instance().getTimeZone());
 
             copyData(*streams.in, *out, [](){ return false; }, [&out](const Block &) { out->flush(); });
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE END executeQueryImpl_after streams.in");
         }
         else if (pipeline.initialized())
         {
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE START executeQueryImpl_after pipeline.initialized()");
             const ASTQueryWithOutput * ast_query_with_output = dynamic_cast<const ASTQueryWithOutput *>(ast.get());
 
             WriteBuffer * out_buf = &ostr;
@@ -1141,6 +1153,7 @@ void executeQuery(
                 auto executor = pipeline.execute();
                 executor->execute(pipeline.getNumThreads());
             }
+            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE END executeQueryImpl_after pipeline.initialized()");
         }
     }
     catch (...)
@@ -1148,6 +1161,7 @@ void executeQuery(
         streams.onException();
         throw;
     }
+    LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE END executeQueryImpl_after");
 
     streams.onFinish();
 }

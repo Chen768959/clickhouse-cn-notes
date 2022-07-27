@@ -447,6 +447,7 @@ void HTTPHandler::processQuery(
     Output & used_output,
     std::optional<CurrentThread::QueryScope> & query_scope)
 {
+    LOG_TRACE(log, "CUSTOM_TRACE START processQuery");
     using namespace Poco::Net;
 
     LOG_TRACE(log, "Request URI: {}", request.getURI());
@@ -768,6 +769,7 @@ void HTTPHandler::processQuery(
 
     query_scope.emplace(context);
 
+    LOG_TRACE(log, "CUSTOM_TRACE IN executeQuery");
     executeQuery(*in, *used_output.out_maybe_delayed_and_compressed, /* allow_into_outfile = */ false, context,
         [&response] (const String & current_query_id, const String & content_type, const String & format, const String & timezone)
         {
@@ -777,6 +779,7 @@ void HTTPHandler::processQuery(
             response.add("X-ClickHouse-Timezone", timezone);
         }
     );
+    LOG_TRACE(log, "CUSTOM_TRACE OUT executeQuery");
 
     if (used_output.hasDelayed())
     {
@@ -787,6 +790,7 @@ void HTTPHandler::processQuery(
     /// Send HTTP headers with code 200 if no exception happened and the data is still not sent to
     /// the client.
     used_output.out->finalize();
+    LOG_TRACE(log, "CUSTOM_TRACE END processQuery");
 }
 
 void HTTPHandler::trySendExceptionToClient(

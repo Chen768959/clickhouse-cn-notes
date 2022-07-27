@@ -309,7 +309,10 @@ void TCPHandler::runImpl()
 
             bool may_have_embedded_data = client_tcp_protocol_version >= DBMS_MIN_REVISION_WITH_CLIENT_SUPPORT_EMBEDDED_DATA;
             /// Processing Query
+            // 准备执行计划
+            LOG_TRACE(log, "CUSTOM_TRACE START TCPH executeQuery");
             state.io = executeQuery(state.query, query_context, false, state.stage, may_have_embedded_data);
+            LOG_TRACE(log, "CUSTOM_TRACE END TCPH executeQuery");
 
             unknown_packet_in_send_data = query_context->getSettingsRef().unknown_packet_in_send_data;
 
@@ -318,19 +321,29 @@ void TCPHandler::runImpl()
 
             if (state.io.out)
             {
+                LOG_TRACE(log, "CUSTOM_TRACE START TCPH state.io.out processInsertQuery");
                 state.need_receive_data_for_insert = true;
                 processInsertQuery(connection_settings);
+                LOG_TRACE(log, "CUSTOM_TRACE END TCPH state.io.out processInsertQuery");
             }
             else if (state.need_receive_data_for_input) // It implies pipeline execution
             {
+                LOG_TRACE(log, "CUSTOM_TRACE START TCPH pipeline execution");
                 /// It is special case for input(), all works for reading data from client will be done in callbacks.
                 auto executor = state.io.pipeline.execute();
                 executor->execute(state.io.pipeline.getNumThreads());
+                LOG_TRACE(log, "CUSTOM_TRACE END TCPH pipeline execution");
             }
-            else if (state.io.pipeline.initialized())
+            else if (state.io.pipeline.initialized()){// 一般情况下的主要运行逻辑
+                LOG_TRACE(log, "CUSTOM_TRACE START TCPH processOrdinaryQueryWithProcessors");
                 processOrdinaryQueryWithProcessors();
-            else if (state.io.in)
+                LOG_TRACE(log, "CUSTOM_TRACE END TCPH processOrdinaryQueryWithProcessors");
+            }
+            else if (state.io.in){
+                LOG_TRACE(log, "CUSTOM_TRACE START TCPH processOrdinaryQuery");
                 processOrdinaryQuery();
+                LOG_TRACE(log, "CUSTOM_TRACE START TCPH processOrdinaryQuery");
+            }
 
             state.io.onFinish();
 
@@ -597,9 +610,9 @@ void TCPHandler::processOrdinaryQuery()
             sendData(header);
 
         /// Use of async mode here enables reporting progress and monitoring client cancelling the query
-        AsynchronousBlockInputStream async_in(state.io.in);
+        AsynchronousBlockInputStream async_in(state.io.in);// 抽象的异步执行查询的流
 
-        async_in.readPrefix();
+        async_in.readPrefix();//开始
         while (true)
         {
             if (isQueryCancelled())
@@ -654,6 +667,7 @@ void TCPHandler::processOrdinaryQuery()
 
 void TCPHandler::processOrdinaryQueryWithProcessors()
 {
+    // interpreter解释器中创建的物理计划
     auto & pipeline = state.io.pipeline;
 
     if (query_context->getSettingsRef().allow_experimental_query_deduplication)
@@ -668,10 +682,17 @@ void TCPHandler::processOrdinaryQueryWithProcessors()
     }
 
     {
+        // 创建executor对象，并装入pipeline
         PullingAsyncPipelineExecutor executor(pipeline);
         CurrentMetrics::Increment query_thread_metric_increment{CurrentMetrics::QueryThread};
 
+        LOG_DEBUG(log, "CUSTOM_TRACE START executor");
         Block block;
+        /**
+         * 异步执行chunk的查询，并设置超时时间，期间各种交互都通过executor进行
+         * 查询结果会相应到block中
+         *
+         */
         while (executor.pull(block, query_context->getSettingsRef().interactive_delay / 1000))
         {
             std::lock_guard lock(task_callback_mutex);
@@ -694,10 +715,12 @@ void TCPHandler::processOrdinaryQueryWithProcessors()
 
             if (block)
             {
+                LOG_DEBUG(log, "CUSTOM_TRACE sendData(block)");
                 if (!state.io.null_format)
                     sendData(block);
             }
         }
+        LOG_DEBUG(log, "CUSTOM_TRACE END executor");
 
         /** If data has run out, we will send the profiling data and total values to
           * the last zero block to be able to use

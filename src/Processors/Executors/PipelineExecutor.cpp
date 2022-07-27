@@ -393,6 +393,7 @@ void PipelineExecutor::execute(size_t num_threads)
 {
     try
     {
+        // 核心执行逻辑
         executeImpl(num_threads);
 
         /// Execution can be stopped because of exception. Check and rethrow if any.
@@ -469,6 +470,8 @@ void PipelineExecutor::wakeUpExecutor(size_t thread_num)
     executor_contexts[thread_num]->condvar.notify_one();
 }
 
+// 单线程查询会进入此处，
+// 多线程并发查询也是并发执行此处
 void PipelineExecutor::executeSingleThread(size_t thread_num, size_t num_threads)
 {
     executeStepImpl(thread_num, num_threads);
@@ -479,6 +482,12 @@ void PipelineExecutor::executeSingleThread(size_t thread_num, size_t num_threads
 #endif
 }
 
+/**
+ * 单线程查询会进入此处，
+ * 多线程并发查询也是并发执行此处
+ * @param thread_num 当前线程在整个线程队列中的index下标位置
+ * @param num_threads 并发度，也是线程队列总数
+ */
 void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, std::atomic_bool * yield_flag)
 {
 #ifndef NDEBUG
@@ -493,6 +502,7 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
     {
         /// First, find any processor to execute.
         /// Just traverse graph and prepare any processor.
+        // 准备node
         while (!finished && node == nullptr)
         {
             {
@@ -507,8 +517,12 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
                     if (context->async_tasks.empty())
                         context->has_async_tasks = false;
                 }
-                else if (!task_queue.empty())
+                else if (!task_queue.empty()){
+                    // task_queue：”各个线程的task队列“ 的队列
+                    // 找到thread_num下标线程对应的task队列，然后取出一个node可执行节点。
+                    // （具体threads_queue来历及内容参考：initializeExecution(num_threads);）
                     node = task_queue.pop(thread_num);
+                }
 
                 if (node)
                 {
@@ -571,6 +585,7 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
         if (finished)
             break;
 
+        // 执行node
         while (node && !yield)
         {
             if (finished)
@@ -684,7 +699,9 @@ void PipelineExecutor::initializeExecution(size_t num_threads)
 {
     is_execution_initialized = true;
 
+    // 线程队列
     threads_queue.init(num_threads);
+    // 每个线程都对应一个task队列，此处定义一共有num_threads个task队列
     task_queue.init(num_threads);
 
     {
@@ -696,6 +713,9 @@ void PipelineExecutor::initializeExecution(size_t num_threads)
     }
 
     Stack stack;
+    // 获取一共存在多少个processors（也可以说是存在多少个graph->nodes），
+    // 然后从0开始，递增模拟把这些index下标都推进stack
+    // 后续根据此stack，就可以从第0位开始，取出graph中所有的node节点了
     addChildlessProcessorsToStack(stack);
 
     {
@@ -710,13 +730,19 @@ void PipelineExecutor::initializeExecution(size_t num_threads)
             UInt64 proc = stack.top();
             stack.pop();
 
+            // 从stack中获取一个index，然后找到该index在graph中的对应node，然后再装入queue队列中
             prepareProcessor(proc, 0, queue, async_queue, std::unique_lock<std::mutex>(graph->nodes[proc]->status_mutex));
 
             while (!queue.empty())
             {
+                /**
+                 * 将node，写入到next_thread线程对应的task队列中
+                 */
                 task_queue.push(queue.front(), next_thread);
                 queue.pop();
 
+                // 每次循环下一条线程index，超过总数就从头再开始，
+                // 保证每条线程对应的task队列中的node数量基本一致
                 ++next_thread;
                 if (next_thread >= num_threads)
                     next_thread = 0;
@@ -733,6 +759,19 @@ void PipelineExecutor::executeImpl(size_t num_threads)
 {
     OpenTelemetrySpanHolder span("PipelineExecutor::executeImpl()");
 
+    /**
+     * 首先：
+     * Processor：他们是pipline里真正执行各种逻辑的对象
+     * node：抽象化的执行节点，一个node对应一个Processor操作
+     * *Graph：每次查询存在一个这种位图，里面包含了各阶段的node对象
+     * task队列：每个线程都有一个对应的task队列，这个task队列里面包含了需要执行的node
+     *
+     * 此处初始化逻辑就是：
+     * 创建了两个队列，所有线程存放的队列。  所有“task队列“ 的队列（每个线程对应一个task队列）
+     * 利用“*Graph”，从中顺序取出node，
+     * 挨个放入个线程的task队列队列中，
+     * 尽量保证每一个线程的task队列中node的数量都一样多
+     */
     initializeExecution(num_threads);
 
     using ThreadsData = std::vector<ThreadFromGlobalPool>;
@@ -752,12 +791,16 @@ void PipelineExecutor::executeImpl(size_t num_threads)
         }
     );
 
+    // 主逻辑
     if (num_threads > 1)
     {
         auto thread_group = CurrentThread::getGroup();
 
+        // 根据并发线程数，创建线程并发执行
         for (size_t i = 0; i < num_threads; ++i)
         {
+            // 创建一个ThreadFromGlobalPool对象
+            // 包含当前executor对象，以及自身线程编号等
             threads.emplace_back([this, thread_group, thread_num = i, num_threads]
             {
                 /// ThreadStatus thread_status;
@@ -774,6 +817,7 @@ void PipelineExecutor::executeImpl(size_t num_threads)
 
                 try
                 {
+                    // （单线程执行是进入的也是此方法）
                     executeSingleThread(thread_num, num_threads);
                 }
                 catch (...)

@@ -214,8 +214,9 @@ std::optional<UInt64> StorageMergeTree::totalRows(const Settings &) const
 
 std::optional<UInt64> StorageMergeTree::totalRowsByPartitionPredicate(const SelectQueryInfo & query_info, ContextPtr local_context) const
 {
-    // 返回MergeTreeData.h中的data_parts_by_state_and_info中的连续的符合Committed条件的part list的始末位置
+    // 返回MergeTreeData.h中的data_parts_by_state_and_info中的连续的符合Committed条件的所有part
     auto parts = getDataPartsVector({DataPartState::Committed});
+    // 从上述part中，根据query条件，从每一个part中查询出其count值最后累加出当前节点当前表的总count并返回
     return totalRowsByPartitionPredicateImpl(query_info, local_context, parts);
 }
 

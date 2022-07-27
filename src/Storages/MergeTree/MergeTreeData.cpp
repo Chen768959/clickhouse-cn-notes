@@ -719,6 +719,7 @@ DataTypePtr MergeTreeData::getPartitionValueType() const
 
 Block MergeTreeData::getBlockWithVirtualPartColumns(const MergeTreeData::DataPartsVector & parts, bool one_part) const
 {
+    // 获取分区字段的类型
     DataTypePtr partition_value_type = getPartitionValueType();
     bool has_partition_value = typeid_cast<const DataTypeTuple *>(partition_value_type.get());
     Block block{
@@ -734,6 +735,7 @@ Block MergeTreeData::getBlockWithVirtualPartColumns(const MergeTreeData::DataPar
     auto & part_uuid_column = columns[2];
     auto & partition_value_column = columns[3];
 
+    // 迭代出每一个part，每一个part都是patitionby分区后的产物，里面包含了各个列的数据
     for (const auto & part_or_projection : parts)
     {
         const auto * part = part_or_projection->isProjectionPart() ? part_or_projection->getParentPart() : part_or_projection.get();
@@ -762,11 +764,20 @@ Block MergeTreeData::getBlockWithVirtualPartColumns(const MergeTreeData::DataPar
 }
 
 
+/**
+ * @param query_info 此次查询信息
+ * @param local_context 对应上下文
+ * @param parts MergeTreeData.h中的data_parts_by_state_and_info中连续的符合"活跃"条件的part list的始末位置
+ * @return
+ */
 std::optional<UInt64> MergeTreeData::totalRowsByPartitionPredicateImpl(
     const SelectQueryInfo & query_info, ContextPtr local_context, const DataPartsVector & parts) const
 {
     if (parts.empty())
         return 0u;
+    // 获取内存中的元数据信息，StorageInMemoryMetadata
+    // 其内部以当前表的列为单位，存储了所有列的所有元数据。
+    // 只有在发生alter table时才会更新元数据信息
     auto metadata_snapshot = getInMemoryMetadataPtr();
     ASTPtr expression_ast;
     Block virtual_columns_block = getBlockWithVirtualPartColumns(parts, true /* one_part */);
@@ -781,6 +792,7 @@ std::optional<UInt64> MergeTreeData::totalRowsByPartitionPredicateImpl(
     std::unordered_set<String> part_values;
     if (valid && expression_ast)
     {
+        // 将parts转化成block，block中包含了所有的part的元数据信息：part_name、part所属patitionid、part_uuid
         virtual_columns_block = getBlockWithVirtualPartColumns(parts, false /* one_part */);
         VirtualColumnUtils::filterBlockWithQuery(query_info.query, virtual_columns_block, local_context, expression_ast);
         part_values = VirtualColumnUtils::extractSingleValueFromBlock<String>(virtual_columns_block, "_part");
@@ -789,6 +801,7 @@ std::optional<UInt64> MergeTreeData::totalRowsByPartitionPredicateImpl(
     }
     // At this point, empty `part_values` means all parts.
 
+    // 获取所有part的count量并累加，得到当前节点当前表的所有符合where条件的count
     size_t res = 0;
     for (const auto & part : parts)
     {

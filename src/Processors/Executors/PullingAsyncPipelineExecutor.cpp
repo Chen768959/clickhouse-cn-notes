@@ -77,6 +77,7 @@ static void threadFunction(PullingAsyncPipelineExecutor::Data & data, ThreadGrou
                 CurrentThread::detachQueryIfNotDetached();
         );
 
+        // 执行pipeline.execute()
         data.executor->execute(num_threads);
     }
     catch (...)
@@ -96,6 +97,7 @@ static void threadFunction(PullingAsyncPipelineExecutor::Data & data, ThreadGrou
 
 bool PullingAsyncPipelineExecutor::pull(Chunk & chunk, uint64_t milliseconds)
 {
+    // 第一次查询时data为空，进行异步执行pipeline
     if (!data)
     {
         data = std::make_unique<Data>();
@@ -142,11 +144,16 @@ bool PullingAsyncPipelineExecutor::pull(Chunk & chunk, uint64_t milliseconds)
 
 bool PullingAsyncPipelineExecutor::pull(Block & block, uint64_t milliseconds)
 {
-    Chunk chunk;
+    Chunk chunk;// 实际保存数据的对象
 
+    // 将实际数据查询进chunk
+    // 第一次进入此处会异步启动多线程执行chunk的查询，并生成一个交互对象data
+    // 后续外层循环不断进入此处时会根据交互对象data判断chunk查询是否结束
     if (!pull(chunk, milliseconds))
         return false;
 
+    // 如果chunk数据未找到，则直接返回外层循环，
+    // 交由其判断是进行下一次循环再进此方法尝试获取chunk，还是直接超时报错结束此次查询
     if (!chunk)
     {
         /// In case if timeout exceeded.
@@ -154,6 +161,7 @@ bool PullingAsyncPipelineExecutor::pull(Block & block, uint64_t milliseconds)
         return true;
     }
 
+    // 将chunk的内容给block赋值，block作为读或写的结果数据块，此处只要有结果了，外层循环就会跳出并返回响应
     block = lazy_format->getPort(IOutputFormat::PortKind::Main).getHeader().cloneWithColumns(chunk.detachColumns());
 
     if (auto chunk_info = chunk.getChunkInfo())
