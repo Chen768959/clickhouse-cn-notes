@@ -28,6 +28,8 @@ namespace ErrorCodes
 
 bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
     auto select_query = std::make_shared<ASTSelectQuery>();
     node = select_query;
 
@@ -88,6 +90,7 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 
     /// WITH expr_list
     {
+        // 判断当前是否为”WITH“关键字，是则后移，并进入if逻辑解析
         if (s_with.ignore(pos, expected))
         {
             if (!ParserList(std::make_unique<ParserWithElement>(), std::make_unique<ParserToken>(TokenType::Comma))
@@ -99,8 +102,10 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     }
 
     /// SELECT [ALL/DISTINCT [ON (expr_list)]] [TOP N [WITH TIES]] expr_list
+    // 判断当前pos位，是否是SELECT 开头的查询
     {
-        bool has_all = false;
+        bool has_all = false;// SELECT 语句后是否跟了”ALL“关键字
+        // 校验当前pos是否为”SELECT“ 是则后移pos，且继续下面的校验
         if (!s_select.ignore(pos, expected))
             return false;
 
@@ -429,6 +434,8 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     select_query->setExpression(ASTSelectQuery::Expression::LIMIT_OFFSET, std::move(limit_offset));
     select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, std::move(limit_length));
     select_query->setExpression(ASTSelectQuery::Expression::SETTINGS, std::move(settings));
+
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery true END");
     return true;
 }
 

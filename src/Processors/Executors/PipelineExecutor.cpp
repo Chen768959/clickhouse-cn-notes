@@ -10,6 +10,9 @@
 #include <Interpreters/ProcessList.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
 #include <common/scope_guard_safe.h>
+#include <string>
+#include <sys/time.h>
+#include <unistd.h>
 
 #ifndef NDEBUG
     #include <Common/Stopwatch.h>
@@ -194,6 +197,14 @@ bool PipelineExecutor::tryAddProcessorToStackIfUpdated(ExecutingGraph::Edge & ed
     return true;
 }
 
+/**
+ *
+ * @param pid 从graph中获取该pid index 的node
+ * @param thread_number unknow
+ * @param queue 将上面获取到的node装入此queue中（注意，只有ready状态的node才会直接存入queue）
+ * @param async_queue unknow
+ * @param node_lock unknow
+ */
 bool PipelineExecutor::prepareProcessor(UInt64 pid, size_t thread_number, Queue & queue, Queue & async_queue, std::unique_lock<std::mutex> node_lock)
 {
     /// In this method we have ownership on node.
@@ -294,6 +305,7 @@ bool PipelineExecutor::prepareProcessor(UInt64 pid, size_t thread_number, Queue 
         }
     }
 
+    // 只有ExpandPipeline状态的node会进此逻辑，并发执行pipline时不会进
     if (need_expand_pipeline)
     {
         Stack stack;
@@ -487,6 +499,7 @@ void PipelineExecutor::executeSingleThread(size_t thread_num, size_t num_threads
  * 多线程并发查询也是并发执行此处
  * @param thread_num 当前线程在整个线程队列中的index下标位置
  * @param num_threads 并发度，也是线程队列总数
+ * @param yield_flag null
  */
 void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, std::atomic_bool * yield_flag)
 {
@@ -502,7 +515,9 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
     {
         /// First, find any processor to execute.
         /// Just traverse graph and prepare any processor.
-        // 准备node
+        // 准备node----------------------------------------
+        // 每次循环都从当前index线程中对应的task_queue中取出一个node，
+        // 当取出一个node后跳出此循环
         while (!finished && node == nullptr)
         {
             {
@@ -585,7 +600,16 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
         if (finished)
             break;
 
-        // 执行node
+        // 执行node ---------------------------------------------------------------
+        // 每次执行完当前node操作后，会判断是否执行后续node节点
+        // （由yield控制，并发执行中，默认yield永远为false，即会不断执行当前node的后续节点）
+//        int tmp_pd = 0;
+//        if(node){
+//            tmp_pd = node->processors_id;
+//            LOG_DEBUG(log,"CUSTOM_TRACE START executeStep："+std::to_string(static_cast<int>(thread_num))+ "...proId："+std::to_string(static_cast<int>(tmp_pd))+"...proName:"+node->processor->getName());
+//        }
+
+        // 每次node执行完毕判断是否还有后续node，还有的话，则继续执行此循环
         while (node && !yield)
         {
             if (finished)
@@ -597,9 +621,8 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
 #ifndef NDEBUG
                 Stopwatch execution_time_watch;
 #endif
-
+                // 执行该node对应的process逻辑
                 node->job();
-
 #ifndef NDEBUG
                 context->execution_time_ns += execution_time_watch.elapsed();
 #endif
@@ -627,6 +650,7 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
                 /// Prepare processor after execution.
                 {
                     auto lock = std::unique_lock<std::mutex>(node->status_mutex);
+                    // 将node->processors_id的下一个node装入queue
                     if (!prepareProcessor(node->processors_id, thread_num, queue, async_queue, std::move(lock)))
                         finish();
                 }
@@ -684,9 +708,11 @@ void PipelineExecutor::executeStepImpl(size_t thread_num, size_t num_threads, st
 #endif
 
             /// We have executed single processor. Check if we need to yield execution.
+            // 并发执行的情况下，不进入此逻辑，单个node执行完后，继续执行后续node
             if (yield_flag && *yield_flag)
                 yield = true;
         }
+//        LOG_DEBUG(log,"CUSTOM_TRACE END executeStep："+std::to_string(static_cast<int>(thread_num))+ "...proId："+std::to_string(static_cast<int>(tmp_pd)));
     }
 
 #ifndef NDEBUG
@@ -730,7 +756,7 @@ void PipelineExecutor::initializeExecution(size_t num_threads)
             UInt64 proc = stack.top();
             stack.pop();
 
-            // 从stack中获取一个index，然后找到该index在graph中的对应node，然后再装入queue队列中
+            // 从stack中获取一个index（proc），然后找到该index在graph中的对应node，然后再装入queue队列中
             prepareProcessor(proc, 0, queue, async_queue, std::unique_lock<std::mutex>(graph->nodes[proc]->status_mutex));
 
             while (!queue.empty())

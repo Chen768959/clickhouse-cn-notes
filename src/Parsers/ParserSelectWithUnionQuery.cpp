@@ -9,8 +9,10 @@ namespace DB
 
 bool ParserSelectWithUnionQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectWithUnionQuery POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     ASTPtr list_node;
 
+    // 将多个解析器对象封装成 ParserUnionList 解析器
     ParserUnionList parser(
         std::make_unique<ParserUnionQueryElement>(),
         std::make_unique<ParserKeyword>("UNION"),
@@ -18,8 +20,11 @@ bool ParserSelectWithUnionQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & 
         std::make_unique<ParserKeyword>("DISTINCT"));
 
     // ExpressionListParsers.cpp ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
-    if (!parser.parse(pos, list_node, expected))
+    if (!parser.parse(pos, list_node, expected)){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectWithUnionQuery false1 END");
         return false;
+    }
+
 
     /// NOTE: We can't simply flatten inner union query now, since we may have different union mode in query,
     /// so flatten may change it's semantics. For example:
@@ -32,6 +37,7 @@ bool ParserSelectWithUnionQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & 
         if (expr_list.children.at(0)->as<ASTSelectWithUnionQuery>())
         {
             node = std::move(expr_list.children.at(0));
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectWithUnionQuery END1");
             return true;
         }
     }
@@ -43,6 +49,7 @@ bool ParserSelectWithUnionQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & 
     select_with_union_query->children.push_back(select_with_union_query->list_of_selects);
     select_with_union_query->list_of_modes = parser.getUnionModes();
 
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectWithUnionQuery END2");
     return true;
 }
 

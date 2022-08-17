@@ -30,6 +30,8 @@ namespace DB
 
 bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
     ParserShowTablesQuery show_tables_p;
     ParserSelectWithUnionQuery select_p;
     ParserTablePropertiesQuery table_p;
@@ -53,7 +55,7 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     ASTPtr query;
 
     bool parsed =
-           explain_p.parse(pos, query, expected)
+           explain_p.parse(pos, query, expected) // 校验当前初始pos关键字是否为 EXPLAIN等系列关键字，不是则返回false
         || select_p.parse(pos, query, expected)
         || show_create_access_entity_p.parse(pos, query, expected) /// should be before `show_tables_p`
         || show_tables_p.parse(pos, query, expected)
@@ -73,8 +75,11 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
         || show_grants_p.parse(pos, query, expected)
         || show_privileges_p.parse(pos, query, expected);
 
-    if (!parsed)// 所有解析器都解析不通
+    if (!parsed){// 所有解析器都解析不通
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false END");
         return false;
+    }
+
 
     /// FIXME: try to prettify this cast using `as<>()`
     auto & query_with_output = dynamic_cast<ASTQueryWithOutput &>(*query);
@@ -83,8 +88,10 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     if (s_into_outfile.ignore(pos, expected))
     {
         ParserStringLiteral out_file_p;
-        if (!out_file_p.parse(pos, query_with_output.out_file, expected))
+        if (!out_file_p.parse(pos, query_with_output.out_file, expected)){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false2 END");
             return false;
+        }
 
         query_with_output.children.push_back(query_with_output.out_file);
     }
@@ -95,8 +102,10 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     {
         ParserIdentifier format_p;
 
-        if (!format_p.parse(pos, query_with_output.format, expected))
+        if (!format_p.parse(pos, query_with_output.format, expected)){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false3 END");
             return false;
+        }
         setIdentifierSpecial(query_with_output.format);
 
         query_with_output.children.push_back(query_with_output.format);
@@ -107,8 +116,10 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     if (s_settings.ignore(pos, expected))
     {
         ParserSetQuery parser_settings(true);
-        if (!parser_settings.parse(pos, query_with_output.settings_ast, expected))
+        if (!parser_settings.parse(pos, query_with_output.settings_ast, expected)){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false4 END");
             return false;
+        }
         query_with_output.children.push_back(query_with_output.settings_ast);
 
         // SETTINGS after FORMAT is not parsed by the SELECT parser (ParserSelectQuery)
@@ -121,6 +132,8 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     }
 
     node = std::move(query);
+
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput END");
     return true;
 }
 

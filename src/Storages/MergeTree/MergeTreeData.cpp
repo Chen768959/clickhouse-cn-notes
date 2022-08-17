@@ -768,7 +768,6 @@ Block MergeTreeData::getBlockWithVirtualPartColumns(const MergeTreeData::DataPar
  * @param query_info 此次查询信息
  * @param local_context 对应上下文
  * @param parts MergeTreeData.h中的data_parts_by_state_and_info中连续的符合"活跃"条件的part list的始末位置
- * @return
  */
 std::optional<UInt64> MergeTreeData::totalRowsByPartitionPredicateImpl(
     const SelectQueryInfo & query_info, ContextPtr local_context, const DataPartsVector & parts) const

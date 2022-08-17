@@ -95,9 +95,6 @@ public:
             pool.wait();
     }
 
-private:
-    Poco::Logger * log;
-
 protected:
     ThreadPool pool{1};
     Poco::Event ready;

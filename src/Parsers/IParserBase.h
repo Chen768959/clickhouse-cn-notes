@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Parsers/IParser.h>
-
+#include <common/logger_useful.h>
 
 namespace DB
 {

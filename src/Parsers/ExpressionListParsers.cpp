@@ -106,13 +106,21 @@ bool ParserList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     return true;
 }
 
+/**
+ * 初始化时传入一个”ParserUnionQueryElement“解析器，
+ * 以及ParserKeyword("UNION")，ParserKeyword("ALL")，ParserKeyword("DISTINCT")，三个关键字匹配器
+ *
+ */
 bool ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
     ASTs elements;
 
+    // 交由ParserUnionQueryElement解析器
+    // 该解析器中包含两个解析器，其中包含很重要的 ParserSelectQuery 解析器，一般select语句都会到达该解析器解析
     auto parse_element = [&]
     {
         ASTPtr element;
+        // elem_parser：ParserUnionQueryElement
         if (!elem_parser->parse(pos, element, expected))
             return false;
 
@@ -123,9 +131,13 @@ bool ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     /// Parse UNION type
     auto parse_separator = [&]
     {
+        // 判断当前是否存在UNION系列关键字
+
+        // 判断当前关键字是否是"UNION"
         if (s_union_parser->ignore(pos, expected))
         {
             // SELECT ... UNION ALL SELECT ...
+            // 判断后面的关键字是否是”ALL“
             if (s_all_parser->check(pos, expected))
             {
                 union_modes.push_back(ASTSelectWithUnionQuery::Mode::ALL);
@@ -143,6 +155,13 @@ bool ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         return false;
     };
 
+    /**
+     * !parse_element -> false
+     * !parse_separator() || !parse_element() -> true
+     *
+     * 先进行parse_element解析验证，
+     *
+     */
     if (!parseUtil(pos, parse_element, parse_separator))
         return false;
 

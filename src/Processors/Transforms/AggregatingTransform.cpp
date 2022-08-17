@@ -155,6 +155,8 @@ private:
 /// Result chunks guaranteed to be sorted by bucket number.
 class ConvertingAggregatedToChunksTransform : public IProcessor
 {
+private:
+    Poco::Logger * log = &Poco::Logger::get("ConvertingAggregatedToChunksTransform");
 public:
     ConvertingAggregatedToChunksTransform(AggregatingTransformParamsPtr params_, ManyAggregatedDataVariantsPtr data_, size_t num_threads_)
         : IProcessor({}, {params_->getHeader()})
@@ -162,6 +164,7 @@ public:
 
     String getName() const override { return "ConvertingAggregatedToChunksTransform"; }
 
+    // data来自prepare
     void work() override
     {
         if (data->empty())
@@ -325,7 +328,7 @@ private:
     {
         is_initialized = true;
 
-        AggregatedDataVariantsPtr & first = data->at(0);
+        AggregatedDataVariantsPtr & first = data->at(0);// in
 
         /// At least we need one arena in first data item per thread
         if (num_threads > first->aggregates_pools.size())
@@ -335,12 +338,12 @@ private:
                 first_pool.emplace_back(std::make_shared<Arena>());
         }
 
-        if (first->type == AggregatedDataVariants::Type::without_key || params->params.overflow_row)
+        if (first->type == AggregatedDataVariants::Type::without_key || params->params.overflow_row)// in
         {
-            params->aggregator.mergeWithoutKeyDataImpl(*data);
+            params->aggregator.mergeWithoutKeyDataImpl(*data);// in 阻塞
+
             auto block = params->aggregator.prepareBlockAndFillWithoutKey(
                 *first, params->final, first->type != AggregatedDataVariants::Type::without_key);
-
             setCurrentChunk(convertToChunk(block));
         }
     }

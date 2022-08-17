@@ -1182,6 +1182,8 @@ private:
     void mergeWithoutKeyDataImpl(
         ManyAggregatedDataVariants & non_empty_data) const;
 
+    AggregatedDataVariantsPtr mergeWithoutKeyDataStepImpl(AggregatedDataVariantsPtr res, AggregatedDataVariantsPtr current) const;
+
     template <typename Method>
     void mergeSingleLevelDataImpl(
         ManyAggregatedDataVariants & non_empty_data) const;

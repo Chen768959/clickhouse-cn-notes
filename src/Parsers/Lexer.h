@@ -17,7 +17,8 @@ namespace DB
     \
     M(QuotedIdentifier)       /** "x", `x` */ \
     \
-    M(OpeningRoundBracket) \
+    M(OpeningRoundBracket)    /** ( */  \
+    \
     M(ClosingRoundBracket) \
     \
     M(OpeningSquareBracket) \

@@ -126,25 +126,39 @@ bool ParserParenthesisExpression::parseImpl(Pos & pos, ASTPtr & node, Expected &
     return true;
 }
 
-
+/**
+ *
+ */
 bool ParserSubquery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSubquery POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     ASTPtr select_node;
     ParserSelectWithUnionQuery select;
 
-    if (pos->type != TokenType::OpeningRoundBracket)
+    // 校验当前pos是否为“(”
+    if (pos->type != TokenType::OpeningRoundBracket){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSubquery false END");
         return false;
+    }
     ++pos;
 
-    if (!select.parse(pos, select_node, expected))
+    //
+    if (!select.parse(pos, select_node, expected)){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSubquery false2 END");
         return false;
+    }
 
-    if (pos->type != TokenType::ClosingRoundBracket)
+
+    // 校验当前pos是否为“)”
+    if (pos->type != TokenType::ClosingRoundBracket){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSubquery false3 END");
         return false;
+    }
     ++pos;
 
     node = std::make_shared<ASTSubquery>();
     node->children.push_back(select_node);
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSubquery END");
     return true;
 }
 

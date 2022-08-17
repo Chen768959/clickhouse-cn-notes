@@ -86,8 +86,10 @@ public:
       *  or what this parser parse if parsing was successful.
       * The string to which the [begin, end) range is included may be not 0-terminated.
       */
+      // 尝试匹配解析，匹配成功则会后移pos，同时还会更新node结果树
     virtual bool parse(Pos & pos, ASTPtr & node, Expected & expected) = 0;
 
+    // 尝试匹配解析，匹配解析成功则会后移pos，但是不更新node结果树
     bool ignore(Pos & pos, Expected & expected)  // -V1071
     {
         ASTPtr ignore_node;
@@ -101,6 +103,7 @@ public:
     }
 
     /** The same, but do not move the position and do not write the result to node.
+     * 尝试匹配解析，但是无论匹配成功与否均不后移pos，也不会更新node结果树
       */
     bool check(Pos & pos, Expected & expected)
     {

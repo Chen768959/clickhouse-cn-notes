@@ -67,15 +67,11 @@ void AsynchronousBlockInputStream::calculate()
     {
         if (first)
         {
-            LOG_TRACE(log, "CUSTOM_TRACE START first BI READ：" + children.back()->getName());
             first = false;
             children.back()->readPrefix();
-            LOG_TRACE(log, "CUSTOM_TRACE END   first BI READ：" + children.back()->getName());
         }
 
-        LOG_TRACE(log, "CUSTOM_TRACE START BI READ：" + children.back()->getName());
         block = children.back()->read();
-        LOG_TRACE(log, "CUSTOM_TRACE END   BI READ：" + children.back()->getName());
     }
     catch (...)
     {
