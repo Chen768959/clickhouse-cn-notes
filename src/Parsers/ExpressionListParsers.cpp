@@ -113,6 +113,7 @@ bool ParserList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
  */
 bool ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionList POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     ASTs elements;
 
     // 交由ParserUnionQueryElement解析器
@@ -162,12 +163,15 @@ bool ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
      * 先进行parse_element解析验证，
      *
      */
-    if (!parseUtil(pos, parse_element, parse_separator))
+    if (!parseUtil(pos, parse_element, parse_separator)){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionList false END");
         return false;
+    }
 
     auto list = std::make_shared<ASTExpressionList>();
     list->children = std::move(elements);
     node = list;
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionList END");
     return true;
 }
 
@@ -427,9 +431,9 @@ bool ParserTernaryOperatorExpression::parseImpl(Pos & pos, ASTPtr & node, Expect
 
 bool ParserLambdaExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    ParserToken arrow(TokenType::Arrow);
-    ParserToken open(TokenType::OpeningRoundBracket);
-    ParserToken close(TokenType::ClosingRoundBracket);
+    ParserToken arrow(TokenType::Arrow);// ->
+    ParserToken open(TokenType::OpeningRoundBracket);// (
+    ParserToken close(TokenType::ClosingRoundBracket);// )
 
     Pos begin = pos;
 
@@ -631,16 +635,28 @@ ParserExpressionWithOptionalAlias::ParserExpressionWithOptionalAlias(bool allow_
 
 bool ParserExpressionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    return ParserList(
-        std::make_unique<ParserExpressionWithOptionalAlias>(allow_alias_without_as_keyword, is_table_function),
-        std::make_unique<ParserToken>(TokenType::Comma))
-        .parse(pos, node, expected);
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExpressionList POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+    /**
+     * 先执行“ParserExpressionWithOptionalAlias”校验，
+     * “如果校验成功”，则继续后移pos忽略“TokenType::Comma（逗号）”关键字
+     * allow_alias_without_as_keyword：true
+     * is_table_function：false（默认）
+     */
+    bool res = ParserList(
+            std::make_unique<ParserExpressionWithOptionalAlias>(allow_alias_without_as_keyword, is_table_function),
+            std::make_unique<ParserToken>(TokenType::Comma))
+            .parse(pos, node, expected);
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExpressionList END:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+    return res;
 }
 
 
 bool ParserNotEmptyExpressionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    return nested_parser.parse(pos, node, expected) && !node->children.empty();
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserNotEmptyExpressionList POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+    bool res = nested_parser.parse(pos, node, expected) && !node->children.empty();
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserNotEmptyExpressionList END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+    return res;
 }
 
 

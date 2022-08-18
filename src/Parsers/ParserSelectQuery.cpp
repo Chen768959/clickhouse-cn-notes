@@ -156,9 +156,14 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
                 select_query->limit_with_ties = true;
         }
 
+        //ParserList(
+        //        std::make_unique<ParserExpressionWithOptionalAlias>(allow_alias_without_as_keyword, is_table_function),
+        //        std::make_unique<ParserToken>(TokenType::Comma)) .parse()
         if (!exp_list_for_select_clause.parse(pos, select_expression_list, expected))
             return false;
     }
+
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery SELECT解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     /// FROM database.table or FROM table or FROM (subquery) or FROM tableFunction(...)
     if (s_from.ignore(pos, expected))
@@ -167,12 +172,16 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             return false;
     }
 
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery FROM解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
     /// PREWHERE expr
     if (s_prewhere.ignore(pos, expected))
     {
         if (!exp_elem.parse(pos, prewhere_expression, expected))
             return false;
     }
+
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery WHERE解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     /// WHERE expr
     if (s_where.ignore(pos, expected))

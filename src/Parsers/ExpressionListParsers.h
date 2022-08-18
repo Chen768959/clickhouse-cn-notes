@@ -22,6 +22,7 @@ using Operators_t = const char **;
 class ParserList : public IParserBase
 {
 public:
+    // 执行elem_parser校验，“如果校验成功”，则继续后移pos忽略直到separator_parser关键字
     ParserList(ParserPtr && elem_parser_, ParserPtr && separator_parser_, bool allow_empty_ = true, char result_separator_ = ',')
         : elem_parser(std::move(elem_parser_))
         , separator_parser(std::move(separator_parser_))
@@ -476,6 +477,8 @@ protected:
 
     const char * getName() const override { return "expression with optional alias"; }
 
+    // impl : ParserWithOptionalAlias(ParserPtr(ParserExpression))
+    // 先校验ParserExpression，失败直接返回false，成功则继续后续校验器
     bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override
     {
         return impl->parse(pos, node, expected);
