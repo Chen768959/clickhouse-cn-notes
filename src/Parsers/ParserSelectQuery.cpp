@@ -162,11 +162,12 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         if (!exp_list_for_select_clause.parse(pos, select_expression_list, expected))
             return false;
     }
+    // 此时，from之前的内容解析完毕，所有内容均在select_expression_list树中
 
     LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery SELECT解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     /// FROM database.table or FROM table or FROM (subquery) or FROM tableFunction(...)
-    if (s_from.ignore(pos, expected))
+    if (s_from.ignore(pos, expected))// 判断是否存在from关键字，存在则进入if，且后移pos
     {
         if (!ParserTablesInSelectQuery().parse(pos, tables, expected))
             return false;

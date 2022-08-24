@@ -162,7 +162,9 @@ bool ParserSubquery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 
 bool ParserIdentifier::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     /// Identifier in backquotes or in double quotes
+    // 判断当前pos 是否是双引号
     if (pos->type == TokenType::QuotedIdentifier)
     {
         ReadBufferFromMemory buf(pos->begin, pos->size());
@@ -173,25 +175,31 @@ bool ParserIdentifier::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         else
             readDoubleQuotedStringWithSQLStyle(s, buf);
 
-        if (s.empty())    /// Identifiers "empty string" are not allowed.
+        if (s.empty()){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier false1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
+        }    /// Identifiers "empty string" are not allowed.
 
         node = std::make_shared<ASTIdentifier>(s);
         ++pos;
+
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier true1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return true;
     }
     else if (pos->type == TokenType::BareWord)
     {
         node = std::make_shared<ASTIdentifier>(String(pos->begin, pos->end));
         ++pos;
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier true2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return true;
     }
-    else if (allow_query_parameter && pos->type == TokenType::OpeningCurlyBrace)
+    else if (allow_query_parameter && pos->type == TokenType::OpeningCurlyBrace)// allow_query_parameter default false
     {
         ++pos;
         if (pos->type != TokenType::BareWord)
         {
             expected.add(pos, "substitution name (identifier)");
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier false2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
@@ -201,6 +209,7 @@ bool ParserIdentifier::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         if (pos->type != TokenType::Colon)
         {
             expected.add(pos, "colon between name and type");
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier false3 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
@@ -209,6 +218,7 @@ bool ParserIdentifier::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         if (pos->type != TokenType::BareWord)
         {
             expected.add(pos, "substitution type (identifier)");
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier false4 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
@@ -218,19 +228,23 @@ bool ParserIdentifier::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         if (type != "Identifier")
         {
             expected.add(pos, "substitution type (identifier)");
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier false5 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
         if (pos->type != TokenType::ClosingCurlyBrace)
         {
             expected.add(pos, "closing curly brace");
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier false6 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
         ++pos;
 
         node = std::make_shared<ASTIdentifier>("", std::make_shared<ASTQueryParameter>(name, type));
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier true2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return true;
     }
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserIdentifier false7 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return false;
 }
 
@@ -282,6 +296,9 @@ bool ParserCompoundIdentifier::parseImpl(Pos & pos, ASTPtr & node, Expected & ex
 
 bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
+    // 只要是BareWord类型的字符串都会被解析出来
     ParserIdentifier id_parser;
     ParserKeyword distinct("DISTINCT");
     ParserKeyword all("ALL");
@@ -297,17 +314,28 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     ASTPtr expr_list_args;
     ASTPtr expr_list_params;
 
-    if (is_table_function)
+    if (is_table_function)// default false
     {
-        if (ParserTableFunctionView().parse(pos, node, expected))
-            return true;
+        if (ParserTableFunctionView().parse(pos, node, expected)){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false0 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+            return false;
+        }
     }
 
-    if (!id_parser.parse(pos, identifier, expected))
-        return false;
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction id_parser start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
-    if (pos->type != TokenType::OpeningRoundBracket)
+    bool id_parser_res = id_parser.parse(pos, identifier, expected);
+    if (!id_parser_res){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
+    }
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction id_parser true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
+    if (pos->type != TokenType::OpeningRoundBracket){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+        return false;
+    }
+
     ++pos;
 
     auto pos_after_bracket = pos;
@@ -322,8 +350,10 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     if (!has_all && all.ignore(pos, expected))
         has_all = true;
 
-    if (has_all && has_distinct)
+    if (has_all && has_distinct){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
+    }
 
     if (has_all || has_distinct)
     {
@@ -338,12 +368,16 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     }
 
     const char * contents_begin = pos->begin;
-    if (!contents.parse(pos, expr_list_args, expected))
+    if (!contents.parse(pos, expr_list_args, expected)){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false3 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
+    }
     const char * contents_end = pos->begin;
 
-    if (pos->type != TokenType::ClosingRoundBracket)
+    if (pos->type != TokenType::ClosingRoundBracket){
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false4 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
+    }
     ++pos;
 
     /** Check for a common error case - often due to the complexity of quoting command-line arguments,
@@ -395,8 +429,10 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         ++pos;
 
         /// Parametric aggregate functions cannot have DISTINCT in parameters list.
-        if (has_distinct)
+        if (has_distinct){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false5 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
+        }
 
         expr_list_params = expr_list_args;
         expr_list_args = nullptr;
@@ -413,8 +449,10 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         if (!has_all && all.ignore(pos, expected))
             has_all = true;
 
-        if (has_all && has_distinct)
+        if (has_all && has_distinct){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false6 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
+        }
 
         if (has_all || has_distinct)
         {
@@ -427,18 +465,27 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             }
         }
 
-        if (!contents.parse(pos, expr_list_args, expected))
+        if (!contents.parse(pos, expr_list_args, expected)){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false7 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
+        }
 
-        if (pos->type != TokenType::ClosingRoundBracket)
+        if (pos->type != TokenType::ClosingRoundBracket){
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false8 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
+        }
         ++pos;
     }
 
+    // 构建当前的 函数node对象（function_node）
+
+    // 创建当前的函数node
     auto function_node = std::make_shared<ASTFunction>();
+    // 将此时解析到的函数node的name 赋值给function_node的name
     tryGetIdentifierNameInto(identifier, function_node->name);
 
     /// func(DISTINCT ...) is equivalent to funcDistinct(...)
+    // 即func(DISTINCT ...)这种写法的函数sql，其node name为 funcDistinct
     if (has_distinct)
         function_node->name += "Distinct";
 
@@ -451,7 +498,7 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         function_node->children.push_back(function_node->parameters);
     }
 
-    if (over.ignore(pos, expected))
+    if (over.ignore(pos, expected))// 判断当前pos是否是OVER关键字，是的话进if，且后移pos
     {
         function_node->is_window_function = true;
 
@@ -464,11 +511,15 @@ bool ParserFunction::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
         ParserWindowReference window_reference;
         if (!window_reference.parse(pos, function_node_as_iast, expected))
         {
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction false9 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
     }
 
+    // 将function_node 复制一份后 赋值给入参引用变量
+    // 至此也可以看出 函数节点中 其name是从原sql中解析出来的函数字符串，函数参数是作为其children节点存在的
     node = function_node;
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserFunction true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return true;
 }
 
@@ -1734,22 +1785,23 @@ const char * ParserAlias::restricted_keywords[] =
 
 bool ParserAlias::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserWithOptionalAlias false END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserAlias POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     ParserKeyword s_as("AS");
     ParserIdentifier id_p;
 
     bool has_as_word = s_as.ignore(pos, expected);
     if (!allow_alias_without_as_keyword && !has_as_word){
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserWithOptionalAlias false1 END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserAlias false1 END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
     }
 
     if (!id_p.parse(pos, node, expected)){
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserWithOptionalAlias false2 END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserAlias false2 END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
     }
 
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserAlias id_p解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     if (!has_as_word)
     {
         /** In this case, the alias can not match the keyword -
@@ -1757,16 +1809,19 @@ bool ParserAlias::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
           *  and in the query "SELECT x FR FROM t", the word FR was considered an alias.
           */
 
+        // 获取node的name
         const String name = getIdentifierName(node);
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserAlias false END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end)+"...node name:"+name);
 
+        // restricted_keywords：关键字数组，包含sql查询中所有可能出现的关键字
         for (const char ** keyword = restricted_keywords; *keyword != nullptr; ++keyword)
             if (0 == strcasecmp(name.data(), *keyword)){
-                LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserWithOptionalAlias false3 END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+                LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserAlias false3 END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
                 return false;
             }
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserWithOptionalAlias END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserAlias END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return true;
 }
 
@@ -2153,6 +2208,8 @@ bool ParserWithOptionalAlias::parseImpl(Pos & pos, ASTPtr & node, Expected & exp
         return false;
     }
 
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserWithOptionalAlias elem_parser解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
     /** Little hack.
       *
       * In the SELECT section, we allow parsing aliases without specifying the AS keyword.
@@ -2179,6 +2236,7 @@ bool ParserWithOptionalAlias::parseImpl(Pos & pos, ASTPtr & node, Expected & exp
                 allow_alias_without_as_keyword_now = false;
 
     ASTPtr alias_node;
+    // 解析select后的 字段、或者函数
     if (ParserAlias(allow_alias_without_as_keyword_now).parse(pos, alias_node, expected))
     {
         /// FIXME: try to prettify this cast using `as<>()`

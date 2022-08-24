@@ -481,7 +481,10 @@ protected:
     // 先校验ParserExpression，失败直接返回false，成功则继续后续校验器
     bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override
     {
-        return impl->parse(pos, node, expected);
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExpressionWithOptionalAlias POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+        bool res = impl->parse(pos, node, expected);
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExpressionWithOptionalAlias END POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+        return res;
     }
 };
 
