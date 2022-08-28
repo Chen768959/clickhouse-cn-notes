@@ -45,6 +45,8 @@ bool ParserSetQuery::parseNameValuePair(SettingChange & change, IParser::Pos & p
 
 bool ParserSetQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSetQuery start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
     ParserToken s_comma(TokenType::Comma);
 
     if (!parse_only_internals)

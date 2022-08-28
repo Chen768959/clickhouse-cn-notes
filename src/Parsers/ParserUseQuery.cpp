@@ -10,6 +10,8 @@ namespace DB
 
 bool ParserUseQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUseQuery start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
     ParserKeyword s_use("USE");
     ParserIdentifier name_p;
 

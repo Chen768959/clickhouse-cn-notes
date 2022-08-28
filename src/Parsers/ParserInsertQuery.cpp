@@ -24,6 +24,8 @@ namespace ErrorCodes
 
 bool ParserInsertQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserInsertQuery start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
+
     ParserKeyword s_insert_into("INSERT INTO");
     ParserKeyword s_table("TABLE");
     ParserKeyword s_function("FUNCTION");
