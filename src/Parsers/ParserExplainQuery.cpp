@@ -13,7 +13,6 @@ namespace DB
 
 bool ParserExplainQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExplainQuery POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     ASTExplainQuery::ExplainKind kind;
 
@@ -39,7 +38,6 @@ bool ParserExplainQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
             kind = ASTExplainQuery::ExplainKind::QueryPlan; //-V1048
     }
     else{
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExplainQuery false END");
         return false;
     }
 
@@ -66,7 +64,6 @@ bool ParserExplainQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
         if (p.parse(pos, query, expected))
             explain_query->setExplainedQuery(std::move(query));
         else{
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExplainQuery false2 END");
             return false;
         }
 
@@ -75,12 +72,10 @@ bool ParserExplainQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
         create_p.parse(pos, query, expected))
         explain_query->setExplainedQuery(std::move(query));
     else{
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExplainQuery false3 END");
         return false;
     }
 
     node = std::move(explain_query);
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExplainQuery END");
     return true;
 }
 

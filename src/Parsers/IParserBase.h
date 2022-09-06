@@ -2,6 +2,7 @@
 
 #include <Parsers/IParser.h>
 #include <common/logger_useful.h>
+#include <Interpreters/Context.h>
 
 namespace DB
 {

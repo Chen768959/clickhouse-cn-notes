@@ -12,6 +12,7 @@
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/parseDatabaseAndTableName.h>
+#include <Parsers/parseDistributeTable.h>
 
 
 namespace DB
@@ -788,6 +789,7 @@ bool ParserAlterCommandList::parseImpl(Pos & pos, ASTPtr & node, Expected & expe
 
 bool ParserAlterQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+
     auto query = std::make_shared<ASTAlterQuery>();
     node = query;
 
@@ -796,10 +798,11 @@ bool ParserAlterQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 
     bool is_live_view = false;
 
-    if (!s_alter_table.ignore(pos, expected))
+    if (!s_alter_table.ignore(pos, expected))// 匹配"ALTER TABLE"关键字，匹配成功进入if且后移pos
     {
-        if (!s_alter_live_view.ignore(pos, expected))
+        if (!s_alter_live_view.ignore(pos, expected)){// 当前解析器不能解析"ALTER LIVE VIEW"语句
             return false;
+        }
         else
             is_live_view = true;
     }
@@ -807,21 +810,35 @@ bool ParserAlterQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     if (is_live_view)
         query->is_live_view = true;
 
-    if (!parseDatabaseAndTableName(pos, expected, query->database, query->table))
+    if (!parseDatabaseAndTableName(pos, expected, query->database, query->table)){
         return false;
+    }
 
     String cluster_str;
     if (ParserKeyword{"ON"}.ignore(pos, expected))
     {
-        if (!ASTQueryWithOnCluster::parse(pos, cluster_str, expected))
+        if (!ASTQueryWithOnCluster::parse(pos, cluster_str, expected)){
             return false;
+        }
     }
     query->cluster = cluster_str;
 
+    // todo 是否启动分布式表alter table（后续可考虑做成可选配置）
+    bool ALLOW_DISTRIBUTE_ALTER = true;
+    if (ALLOW_DISTRIBUTE_ALTER){
+        if (context){
+            if (query->database.empty()){
+                query->database = context->get()->getCurrentDatabase();
+            }
+            parseDistributeClusterAndDbAndTableName(context, query->cluster, query->database, query->table);
+        }
+    }
+
     ParserAlterCommandList p_command_list(is_live_view);
     ASTPtr command_list;
-    if (!p_command_list.parse(pos, command_list, expected))
-        return false;
+    if (!p_command_list.parse(pos, command_list, expected)){
+         return false;
+    }
 
     query->set(query->command_list, command_list);
 

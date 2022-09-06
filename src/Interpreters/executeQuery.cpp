@@ -383,7 +383,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     String query_table;
     try
     {
-        ParserQuery parser(end);
+        ParserQuery parser(end, &context);
 
         /// TODO: parser should fail early when max_query_size limit is reached.
         /**
@@ -581,9 +581,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
              * （1）执行从本地磁盘读取数据计划（executeFetchColumns(from_stage, query_plan)）
              *
              */
-            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE start interpreter->execute()");
             res = interpreter->execute();
-            LOG_DEBUG(&Poco::Logger::get("executeQuery"), "CUSTOM_TRACE end interpreter->execute()");
         }
 
         // 后续所有逻辑都是按照此pipeline执行

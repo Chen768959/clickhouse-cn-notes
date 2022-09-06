@@ -113,7 +113,6 @@ bool ParserList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
  */
 bool ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionList POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     ASTs elements;
 
     // 交由ParserUnionQueryElement解析器
@@ -164,14 +163,12 @@ bool ParserUnionList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
      *
      */
     if (!parseUtil(pos, parse_element, parse_separator)){
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionList false END");
         return false;
     }
 
     auto list = std::make_shared<ASTExpressionList>();
     list->children = std::move(elements);
     node = list;
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionList END");
     return true;
 }
 
@@ -202,7 +199,6 @@ bool ParserLeftAssociativeBinaryOperatorList::parseImpl(Pos & pos, ASTPtr & node
 
     // ParserCastExpression
     // ParserExpressionWithOptionalAlias(false)
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLeftAssociativeBinaryOperatorList start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     bool first = true;
 
     auto current_depth = pos.depth;
@@ -211,13 +207,10 @@ bool ParserLeftAssociativeBinaryOperatorList::parseImpl(Pos & pos, ASTPtr & node
         if (first)
         {
             ASTPtr elem;
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLeftAssociativeBinaryOperatorList first_elem_parser1 start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             bool first_elem_parser_res = first_elem_parser->parse(pos, elem, expected);
             if (!first_elem_parser_res){
-                LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLeftAssociativeBinaryOperatorList first_elem_parser1 false end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
                 return false;
             }
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLeftAssociativeBinaryOperatorList first_elem_parser1 true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
             node = elem;
             first = false;
@@ -250,7 +243,6 @@ bool ParserLeftAssociativeBinaryOperatorList::parseImpl(Pos & pos, ASTPtr & node
 
             ASTPtr elem;
             if (!(remaining_elem_parser ? remaining_elem_parser : first_elem_parser)->parse(pos, elem, expected)){
-                LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLeftAssociativeBinaryOperatorList false2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
                 return false;
             }
 
@@ -268,7 +260,6 @@ bool ParserLeftAssociativeBinaryOperatorList::parseImpl(Pos & pos, ASTPtr & node
             if (0 == strcmp(it[0], "["))
             {
                 if (pos->type != TokenType::ClosingSquareBracket){
-                    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLeftAssociativeBinaryOperatorList false3 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
                     return false;
                 }
                 ++pos;
@@ -282,14 +273,12 @@ bool ParserLeftAssociativeBinaryOperatorList::parseImpl(Pos & pos, ASTPtr & node
     }
 
     pos.depth = current_depth;
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLeftAssociativeBinaryOperatorList true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return true;
 }
 
 
 bool ParserVariableArityOperatorList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserVariableArityOperatorList start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     ASTPtr arguments;
 
@@ -297,11 +286,9 @@ bool ParserVariableArityOperatorList::parseImpl(Pos & pos, ASTPtr & node, Expect
     // -> ParserLogicalNotExpression:
     // -> ParserAdditiveExpression
     if (!elem_parser->parse(pos, node, expected)){
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserVariableArityOperatorList false1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserVariableArityOperatorList if1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     while (true)
     {
@@ -316,20 +303,17 @@ bool ParserVariableArityOperatorList::parseImpl(Pos & pos, ASTPtr & node, Expect
 
         ASTPtr elem;
         if (!elem_parser->parse(pos, elem, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserVariableArityOperatorList false2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
         arguments->children.push_back(elem);
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserVariableArityOperatorList true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return true;
 }
 
 bool ParserBetweenExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserBetweenExpression start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     /// For the expression (subject [NOT] BETWEEN left AND right)
     ///  create an AST the same as for (subject> = left AND subject <= right).
 
@@ -342,7 +326,6 @@ bool ParserBetweenExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & exp
     ASTPtr right;
 
     if (!elem_parser.parse(pos, subject, expected)){
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserBetweenExpression false1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
     }
 
@@ -359,17 +342,14 @@ bool ParserBetweenExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & exp
     else
     {
         if (!elem_parser.parse(pos, left, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserBetweenExpression false2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
         if (!s_and.ignore(pos, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserBetweenExpression false3 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
         if (!elem_parser.parse(pos, right, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserBetweenExpression false4 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
@@ -419,13 +399,11 @@ bool ParserBetweenExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & exp
         node = f_combined_expression;
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserBetweenExpression true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return true;
 }
 
 bool ParserTernaryOperatorExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTernaryOperatorExpression start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     ParserToken symbol1(TokenType::QuestionMark);
     ParserToken symbol2(TokenType::Colon);
 
@@ -435,11 +413,9 @@ bool ParserTernaryOperatorExpression::parseImpl(Pos & pos, ASTPtr & node, Expect
 
     // ParserLogicalOrExpression
     if (!elem_parser.parse(pos, elem_cond, expected)){
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTernaryOperatorExpression false1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTernaryOperatorExpression if1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     if (!symbol1.ignore(pos, expected))
         node = elem_cond;
@@ -474,14 +450,12 @@ bool ParserTernaryOperatorExpression::parseImpl(Pos & pos, ASTPtr & node, Expect
         node = function;
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTernaryOperatorExpression true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return true;
 }
 
 
 bool ParserLambdaExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserLambdaExpression in POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     ParserToken arrow(TokenType::Arrow);// ->
     ParserToken open(TokenType::OpeningRoundBracket);// (
     ParserToken close(TokenType::ClosingRoundBracket);// )

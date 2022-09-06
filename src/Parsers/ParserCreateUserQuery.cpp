@@ -305,7 +305,6 @@ namespace
 
 bool ParserCreateUserQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserCreateUserQuery start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     bool alter = false;
     if (attach_mode)

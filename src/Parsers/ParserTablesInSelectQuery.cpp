@@ -19,7 +19,6 @@ namespace ErrorCodes
 
 bool ParserTableExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTableExpression start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     auto res = std::make_shared<ASTTableExpression>();
 
@@ -28,7 +27,6 @@ bool ParserTableExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
         && !ParserWithOptionalAlias(std::make_unique<ParserFunction>(true, true), true).parse(pos, res->table_function, expected)
         && !ParserWithOptionalAlias(std::make_unique<ParserCompoundIdentifier>(true, true), true)
                 .parse(pos, res->database_and_table_name, expected)){
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTableExpression false1 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
         return false;
     }
 
@@ -42,7 +40,6 @@ bool ParserTableExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
         ParserSampleRatio ratio;
 
         if (!ratio.parse(pos, res->sample_size, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTableExpression false2 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
             return false;
         }
 
@@ -50,7 +47,6 @@ bool ParserTableExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
         if (ParserKeyword("OFFSET").ignore(pos, expected))
         {
             if (!ratio.parse(pos, res->sample_offset, expected)){
-                LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTableExpression false3 end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
                 return false;
             }
         }
@@ -71,7 +67,6 @@ bool ParserTableExpression::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
 
     node = res;
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserTableExpression true end POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     return true;
 
 }

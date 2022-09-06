@@ -11,14 +11,12 @@ namespace DB
 //select 解析器
 bool ParserUnionQueryElement::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionQueryElement POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
     /**
      * ParserSubquery().parse()：先检查当前是否存在“（ SELECT”开头的子查询。如果不存在，则继续后面的校验
      * ParserSelectQuery().parse()：正常 SELECT 关键字的查询校验
      */
     if (!ParserSubquery().parse(pos, node, expected) && !ParserSelectQuery().parse(pos, node, expected)){
         // 既不是子查询，也不是一般查询，直接返回false
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionQueryElement false END");
         return false;
     }
 
@@ -26,7 +24,6 @@ bool ParserUnionQueryElement::parseImpl(Pos & pos, ASTPtr & node, Expected & exp
     if (const auto * ast_subquery = node->as<ASTSubquery>())
         node = ast_subquery->children.at(0);
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserUnionQueryElement END");
     return true;
 }
 

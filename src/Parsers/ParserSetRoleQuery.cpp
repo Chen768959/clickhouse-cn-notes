@@ -48,7 +48,6 @@ namespace
 
 bool ParserSetRoleQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSetRoleQuery start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     using Kind = ASTSetRoleQuery::Kind;
     Kind kind;

@@ -19,8 +19,12 @@ protected:
 class ParserOptimizeQuery : public IParserBase
 {
 protected:
+    ContextMutablePtr * context = nullptr;
     const char * getName() const override { return "OPTIMIZE query"; }
     bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+public:
+    ParserOptimizeQuery(){}
+    ParserOptimizeQuery(ContextMutablePtr * context_) : context(context_) {}
 };
 
 }

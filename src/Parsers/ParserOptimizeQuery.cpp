@@ -5,7 +5,7 @@
 #include <Parsers/ASTOptimizeQuery.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ExpressionListParsers.h>
-
+#include <Parsers/parseDistributeTable.h>
 
 namespace DB
 {
@@ -25,6 +25,7 @@ bool ParserOptimizeQueryColumnsSpecification::parseImpl(Pos & pos, ASTPtr & node
 
 bool ParserOptimizeQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
+
     ParserKeyword s_optimize_table("OPTIMIZE TABLE");
     ParserKeyword s_partition("PARTITION");
     ParserKeyword s_final("FINAL");
@@ -84,6 +85,18 @@ bool ParserOptimizeQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expecte
     tryGetIdentifierNameInto(table, query->table);
 
     query->cluster = cluster_str;
+
+    // todo 是否启动分布式表optimize（后续可考虑做成可选配置）
+    bool ALLOW_DISTRIBUTE_OPTIMIZE = true;
+    if (ALLOW_DISTRIBUTE_OPTIMIZE){
+        if (context){
+            if (query->database.empty()){
+                query->database = context->get()->getCurrentDatabase();
+            }
+            parseDistributeClusterAndDbAndTableName(context, query->cluster, query->database, query->table);
+        }
+    }
+
     if ((query->partition = partition))
         query->children.push_back(partition);
     query->final = final;

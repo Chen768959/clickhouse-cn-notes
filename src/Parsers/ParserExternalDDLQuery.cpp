@@ -26,7 +26,6 @@ namespace ErrorCodes
 
 bool ParserExternalDDLQuery::parseImpl(IParser::Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserExternalDDLQuery start POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     ParserFunction p_function;
     ParserKeyword s_external("EXTERNAL DDL FROM");

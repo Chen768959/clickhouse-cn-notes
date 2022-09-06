@@ -30,7 +30,6 @@ namespace DB
 
 bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     ParserShowTablesQuery show_tables_p;
     ParserSelectWithUnionQuery select_p;
@@ -38,11 +37,11 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     ParserDescribeTableQuery describe_table_p;
     ParserShowProcesslistQuery show_processlist_p;
     ParserCreateQuery create_p;
-    ParserAlterQuery alter_p;
+    ParserAlterQuery alter_p(context);
     ParserRenameQuery rename_p;
     ParserDropQuery drop_p;
     ParserCheckQuery check_p;
-    ParserOptimizeQuery optimize_p;
+    ParserOptimizeQuery optimize_p(context);
     ParserKillQueryQuery kill_query_p;
     ParserWatchQuery watch_p;
     ParserShowAccessQuery show_access_p;
@@ -76,7 +75,6 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
         || show_privileges_p.parse(pos, query, expected);
 
     if (!parsed){// 所有解析器都解析不通
-        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false END");
         return false;
     }
 
@@ -89,7 +87,6 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     {
         ParserStringLiteral out_file_p;
         if (!out_file_p.parse(pos, query_with_output.out_file, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false2 END");
             return false;
         }
 
@@ -103,7 +100,6 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
         ParserIdentifier format_p;
 
         if (!format_p.parse(pos, query_with_output.format, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false3 END");
             return false;
         }
         setIdentifierSpecial(query_with_output.format);
@@ -117,7 +113,6 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
     {
         ParserSetQuery parser_settings(true);
         if (!parser_settings.parse(pos, query_with_output.settings_ast, expected)){
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput false4 END");
             return false;
         }
         query_with_output.children.push_back(query_with_output.settings_ast);
@@ -133,7 +128,6 @@ bool ParserQueryWithOutput::parseImpl(Pos & pos, ASTPtr & node, Expected & expec
 
     node = std::move(query);
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserQueryWithOutput END");
     return true;
 }
 

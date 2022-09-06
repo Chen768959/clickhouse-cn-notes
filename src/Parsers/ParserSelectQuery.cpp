@@ -28,7 +28,6 @@ namespace ErrorCodes
 
 bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     auto select_query = std::make_shared<ASTSelectQuery>();
     node = select_query;
@@ -164,7 +163,6 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     }
     // 此时，from之前的内容解析完毕，所有内容均在select_expression_list树中
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery SELECT解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     /// FROM database.table or FROM table or FROM (subquery) or FROM tableFunction(...)
     if (s_from.ignore(pos, expected))// 判断是否存在from关键字，存在则进入if，且后移pos
@@ -173,7 +171,6 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             return false;
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery FROM解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     /// PREWHERE expr
     if (s_prewhere.ignore(pos, expected))
@@ -182,7 +179,6 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             return false;
     }
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery WHERE解析完毕 POS_BE:"+std::string(pos.get().begin)+"...POS_EN:"+std::string(pos.get().end));
 
     /// WHERE expr
     if (s_where.ignore(pos, expected))
@@ -445,7 +441,6 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, std::move(limit_length));
     select_query->setExpression(ASTSelectQuery::Expression::SETTINGS, std::move(settings));
 
-    LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE ParserSelectQuery true END");
     return true;
 }
 

@@ -140,6 +140,8 @@ SRCS(
     makeASTForLogicalFunction.cpp
     obfuscateQueries.cpp
     parseDatabaseAndTableName.cpp
+    parseDistributeTable.cpp
+    ParseDistributeMetadata.cpp
     parseIdentifierOrStringLiteral.cpp
     parseIntervalKind.cpp
     parseQuery.cpp
