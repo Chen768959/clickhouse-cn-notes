@@ -261,7 +261,10 @@ ASTPtr tryParseQuery(
 
     Expected expected;
     ASTPtr res;
+    // parser为ParserQuery，由executeQuery初始定义
+    // 利用各个parser对象解析sql，最终得到树状结构的ast对象，并将对象赋值给res
     const bool parse_res = parser.parse(token_iterator, res, expected);
+
     const auto last_token = token_iterator.max();
     _out_query_end = last_token.end;
 

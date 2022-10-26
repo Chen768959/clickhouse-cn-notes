@@ -59,6 +59,12 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr, ContextPtr context, c
     return executeDDLQueryOnCluster(query_ptr, context, AccessRightsElements{query_requires_access});
 }
 
+/**
+ *
+ * @param query_ptr_ 此次查询的ast对象
+ * @param context 上下文
+ * @param query_requires_access 此次查询所必要的权限项
+ */
 BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, AccessRightsElements && query_requires_access)
 {
     /// Remove FORMAT <fmt> and INTO OUTFILE <file> if exists
@@ -66,6 +72,7 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
     ASTQueryWithOutput::resetOutputASTIfExist(*query_ptr);
 
     // XXX: serious design flaw since `ASTQueryWithOnCluster` is not inherited from `IAST`!
+    // 只有继承了ASTQueryWithOnCluster接口的ast类型，才能进行ddl操作
     auto * query = dynamic_cast<ASTQueryWithOnCluster *>(query_ptr.get());
     if (!query)
     {
@@ -84,11 +91,14 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
         }
     }
 
+    // 获取此次查询的cluster对象
     query->cluster = context->getMacros()->expand(query->cluster);
     ClusterPtr cluster = context->getCluster(query->cluster);
+    // 所有ddl操作都得排队操作。DDLWorker负责是所有ddl操作的入口，他负责启动线程操作ddl，也负责多谢ddlQuery队列
     DDLWorker & ddl_worker = context->getDDLWorker();
 
     /// Enumerate hosts which will be used to send query.
+    // 获取此cluster涉及的所有主机地址
     Cluster::AddressesWithFailover shards = cluster->getShardsAddresses();
     std::vector<HostID> hosts;
     for (const auto & shard : shards)
@@ -102,6 +112,7 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
 
     /// The current database in a distributed query need to be replaced with either
     /// the local current database or a shard's default database.
+    // 判断此次查询是否指定了database，如果未指定，则为true
     bool need_replace_current_database = std::any_of(
         query_requires_access.begin(),
         query_requires_access.end(),
@@ -110,6 +121,9 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
     bool use_local_default_database = false;
     const String & current_database = context->getCurrentDatabase();
 
+    // 因为此次查询未指定database，
+    // 所以尝试用配置中指定的shard replica的 “default_database”
+    // 如果也未指定，则使用default库
     if (need_replace_current_database)
     {
         Strings shard_default_databases;
@@ -156,6 +170,7 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
     visitor.visitDDL(query_ptr);
 
     /// Check access rights, assume that all servers have the same users config
+    // 检查用户是否拥有“query_requires_access”中必须的所有权限项
     context->checkAccess(query_requires_access);
 
     DDLLogEntry entry;
@@ -163,18 +178,33 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
     entry.query = queryToString(query_ptr);
     entry.initiator = ddl_worker.getCommonHostID();
     entry.setSettingsIfRequired(context);
+    // 在ck上创建 “/clickhouse/task_queue/ddl/query-0000000xxx/finished” 和 “/clickhouse/task_queue/ddl/query-0000000xxx/active” 这两个node路径。
+    // 其中query-0000000xxx 指代的就是当前ddl请求。
+    // 如果该ddl正在执行，则active节点下面会有正在执行的ck主机，
+    // 如果该ddl执行结束，则active节点下为空，finished节点下会有所有执行结束的主机
+    // 如果当前ddl还未开始执行，则只是光建好active和finished这两个节点路径，其下皆为空
     String node_path = ddl_worker.enqueueQuery(entry);
 
     return getDistributedDDLStatus(node_path, entry, context);
 }
 
+ /**
+  *
+  * @param node_path 由ddl_worker.enqueueQuery(entry)返回
+  * @param entry 包含query ast的封装ddl对象
+  * @param context context
+  * @return 一般情况下为 DDLQueryStatusInputStream （distributed_ddl_output_mode=null时，则创建NullAndDoCopyBlockInputStream，不输出任何响应结果）
+  */
 BlockIO getDistributedDDLStatus(const String & node_path, const DDLLogEntry & entry, ContextPtr context, const std::optional<Strings> & hosts_to_wait)
 {
     BlockIO io;
     if (context->getSettingsRef().distributed_ddl_task_timeout == 0)
         return io;
 
+    // 创建ddl操作的io对象
     BlockInputStreamPtr stream = std::make_shared<DDLQueryStatusInputStream>(node_path, entry, context, hosts_to_wait);
+    // 如果distributed_ddl_output_mode参数设置的none，
+    // 则不对外返回ddl查询结果（有报错的话，还是会抛出异常）
     if (context->getSettingsRef().distributed_ddl_output_mode == DistributedDDLOutputMode::NONE)
     {
         /// Wait for query to finish, but ignore output

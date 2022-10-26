@@ -1441,6 +1441,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
         }
 
         // 启动所有socket端口对应服务
+        // ProtocolServerAdapter::TCPServerAdapterImpl.start()
         for (auto & server : *servers)
             server.start();
         LOG_INFO(log, "Ready for connections.");

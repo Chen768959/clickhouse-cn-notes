@@ -30,11 +30,16 @@ BlockIO InterpreterOptimizeQuery::execute()
     getContext()->checkAccess(getRequiredAccess());
 
     auto table_id = getContext()->resolveStorageID(ast, Context::ResolveOrdinary);
+
+    // 获取表引擎的storage对象
+    // 所有dabase和table的Storage对象都已经加载到内存map里了，key是库名或表名，
+    // 此处的table_id其实就是ast树，从里面拿出库名表名后，找到表对应 Storage对象
     StoragePtr table = DatabaseCatalog::instance().getTable(table_id, getContext());
     auto metadata_snapshot = table->getInMemoryMetadataPtr();
 
     // Empty list of names means we deduplicate by all columns, but user can explicitly state which columns to use.
     Names column_names;
+    // optimize命令中是否包含DEDUPLICATE关键字，以指定去重列
     if (ast.deduplicate_by_columns)
     {
         // User requested custom set of columns for deduplication, possibly with Column Transformer expression.
@@ -69,6 +74,15 @@ BlockIO InterpreterOptimizeQuery::execute()
         }
     }
 
+    /**
+     * query_ptr：总查询ast
+     * metadata_snapshot：表元数据
+     * ast.partition：手动指定了merge的分片
+     * ast.final：是否包含final条件
+     * ast.deduplicate：是否指定去重字段
+     * column_names：具体去重字段
+     * getContext()：上下文
+     */
     table->optimize(query_ptr, metadata_snapshot, ast.partition, ast.final, ast.deduplicate, column_names, getContext());
 
     return {};

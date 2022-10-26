@@ -846,6 +846,7 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
     auto database_name = create.database.empty() ? current_database : create.database;
 
     // If this is a stub ATTACH query, read the query definition from the database
+    // attach语法逻辑
     if (create.attach && !create.storage && !create.columns_list)
     {
         auto database = DatabaseCatalog::instance().getDatabase(database_name);
@@ -1192,6 +1193,7 @@ void InterpreterCreateQuery::prepareOnClusterQuery(ASTCreateQuery & create, Cont
     {
         /// Check that {uuid} macro is not used in zookeeper_path for ReplicatedMergeTree.
         /// Otherwise replicas will generate different paths.
+        // storage就是对于建表sql中ENGINE内容的解析
         if (!create.storage)
             return;
         if (!create.storage->engine)
@@ -1225,10 +1227,14 @@ void InterpreterCreateQuery::prepareOnClusterQuery(ASTCreateQuery & create, Cont
 BlockIO InterpreterCreateQuery::execute()
 {
     FunctionNameNormalizer().visit(query_ptr.get());
+    // 将ast转化成其真正的实现类型
     auto & create = query_ptr->as<ASTCreateQuery &>();
+    // 如果是cluster语句，则执行cluster逻辑
     if (!create.cluster.empty())
     {
+        // 主要和创建replicated表的“cross-replication”配置有关
         prepareOnClusterQuery(create, getContext(), create.cluster);
+        // 将此ast交由executeDDLQueryOnCluster 由onCluster逻辑执行
         return executeDDLQueryOnCluster(query_ptr, getContext(), getRequiredAccess());
     }
 
@@ -1243,10 +1249,11 @@ BlockIO InterpreterCreateQuery::execute()
         return createTable(create);
 }
 
-
+// 返回此次查询，需要获取的权限列表
 AccessRightsElements InterpreterCreateQuery::getRequiredAccess() const
 {
     /// Internal queries (initiated by the server itself) always have access to everything.
+    // 如果是内部查询，则不需要验证任何权限
     if (internal)
         return {};
 

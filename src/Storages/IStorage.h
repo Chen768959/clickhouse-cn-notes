@@ -416,6 +416,14 @@ public:
 
     /** Perform any background work. For example, combining parts in a MergeTree type table.
       * Returns whether any work has been done.
+      *
+      * query：总查询ast
+      * metadata_snapshot：表元数据
+      * ast.partition：手动指定了merge的分片
+      * ast.final：是否包含final条件
+      * ast.deduplicate：是否指定去重字段
+      * column_names：具体去重字段
+      * getContext()：上下文
       */
     virtual bool optimize(
         const ASTPtr & /*query*/,

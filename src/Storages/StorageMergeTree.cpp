@@ -678,9 +678,10 @@ void StorageMergeTree::loadMutations()
         increment.value = std::max(Int64(increment.value.load()), current_mutations_by_version.rbegin()->first);
 }
 
+// 该方法需上锁执行
 std::shared_ptr<StorageMergeTree::MergeMutateSelectedEntry> StorageMergeTree::selectPartsToMerge(
     const StorageMetadataPtr & metadata_snapshot,
-    bool aggressive,
+    bool aggressive,// true
     const String & partition_id,
     bool final,
     String * out_disable_reason,
@@ -734,7 +735,7 @@ std::shared_ptr<StorageMergeTree::MergeMutateSelectedEntry> StorageMergeTree::se
             *out_disable_reason = "Current value of max_source_parts_size is zero";
     }
     else
-    {
+    {// partition_id不为空
         while (true)
         {
             UInt64 disk_space = getStoragePolicy()->getMaxUnreservedFreeSpace();
@@ -791,6 +792,7 @@ std::shared_ptr<StorageMergeTree::MergeMutateSelectedEntry> StorageMergeTree::se
     return std::make_shared<MergeMutateSelectedEntry>(future_part, std::move(merging_tagger), MutationCommands{});
 }
 
+// 合并指定分片
 bool StorageMergeTree::merge(
     bool aggressive,
     const String & partition_id,
@@ -800,6 +802,7 @@ bool StorageMergeTree::merge(
     String * out_disable_reason,
     bool optimize_skip_merged_partitions)
 {
+    // 上锁，防止merge期间表被删
     auto table_lock_holder = lockForShare(RWLockImpl::NO_QUERY, getSettings()->lock_acquire_timeout_for_background_operations);
     auto metadata_snapshot = getInMemoryMetadataPtr();
 
@@ -808,15 +811,16 @@ bool StorageMergeTree::merge(
     std::shared_ptr<MergeMutateSelectedEntry> merge_mutate_entry;
 
     {
+        // 给selectPartsToMerge逻辑上锁
         std::unique_lock lock(currently_processing_in_background_mutex);
         if (merger_mutator.merges_blocker.isCancelled())
             throw Exception("Cancelled merging parts", ErrorCodes::ABORTED);
 
         merge_mutate_entry = selectPartsToMerge(
             metadata_snapshot,
-            aggressive,
-            partition_id,
-            final,
+            aggressive, // true
+            partition_id, // 指定的分片id
+            final, // 是否包含final
             out_disable_reason,
             table_lock_holder,
             lock,
@@ -1161,6 +1165,15 @@ void StorageMergeTree::clearOldMutations(bool truncate)
     }
 }
 
+/**
+* query：总查询ast
+* metadata_snapshot：表元数据
+* ast.partition：手动指定了merge的分片
+* ast.final：是否包含final条件
+* ast.deduplicate：是否指定去重字段
+* column_names：具体去重字段
+* getContext()：上下文
+*/
 bool StorageMergeTree::optimize(
     const ASTPtr & /*query*/,
     const StorageMetadataPtr & /*metadata_snapshot*/,
@@ -1179,6 +1192,7 @@ bool StorageMergeTree::optimize(
     }
 
     String disable_reason;
+    // 没有指定分片，且带有final标识
     if (!partition && final)
     {
         DataPartsVector data_parts = getDataPartsVector();
@@ -1187,8 +1201,10 @@ bool StorageMergeTree::optimize(
         for (const DataPartPtr & part : data_parts)
             partition_ids.emplace(part->info.partition_id);
 
+        // 循环merge多个分片
         for (const String & partition_id : partition_ids)
         {
+            // merge指定分片
             if (!merge(
                     true,
                     partition_id,
@@ -1209,12 +1225,14 @@ bool StorageMergeTree::optimize(
             }
         }
     }
+    // 指定merge分片id
     else
     {
         String partition_id;
         if (partition)
             partition_id = getPartitionIDFromQuery(partition, local_context);
 
+        // 合并指定分片
         if (!merge(
                 true,
                 partition_id,

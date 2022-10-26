@@ -228,6 +228,7 @@ ZooKeeperPtr DDLWorker::tryGetZooKeeper() const
 
 ZooKeeperPtr DDLWorker::getAndSetZooKeeper()
 {
+    // 创建zookeeper_mutex时加锁，对象析构时解锁
     std::lock_guard lock(zookeeper_mutex);
 
     if (!current_zookeeper || current_zookeeper->expired())
@@ -1000,11 +1001,13 @@ bool DDLWorker::canRemoveQueueEntry(const String & entry_name, const Coordinatio
 /// Try to create nonexisting "status" dirs for a node
 void DDLWorker::createStatusDirs(const std::string & node_path, const ZooKeeperPtr & zookeeper)
 {
+    // vector<RequestPtr>
     Coordination::Requests ops;
     ops.emplace_back(zkutil::makeCreateRequest(fs::path(node_path) / "active", {}, zkutil::CreateMode::Persistent));
     ops.emplace_back(zkutil::makeCreateRequest(fs::path(node_path) / "finished", {}, zkutil::CreateMode::Persistent));
 
     Coordination::Responses responses;
+    // 异步发送zk创建请求
     Coordination::Error code = zookeeper->tryMulti(ops, responses);
 
     bool both_created = code == Coordination::Error::ZOK;
@@ -1035,14 +1038,18 @@ void DDLWorker::createStatusDirs(const std::string & node_path, const ZooKeeperP
 
 String DDLWorker::enqueueQuery(DDLLogEntry & entry)
 {
+    LOG_INFO(log, "CUSTOM_TRACE ZK_LOG start enqueueQuery");
     if (entry.hosts.empty())
         throw Exception("Empty host list in a distributed DDL task", ErrorCodes::LOGICAL_ERROR);
 
     auto zookeeper = getAndSetZooKeeper();
 
     String query_path_prefix = fs::path(queue_dir) / "query-";
+    // 创建query_path_prefix中所有父节点，也就是尝试创建 “fs::path(queue_dir)”中的各个node
+    LOG_INFO(log, "CUSTOM_TRACE ZK_LOG query_path_prefix:"+query_path_prefix);
     zookeeper->createAncestors(query_path_prefix);
 
+    // 创建 "query-"这个node（此时该node的父node均已创建）
     String node_path = zookeeper->create(query_path_prefix, entry.toString(), zkutil::CreateMode::PersistentSequential);
 
     /// We cannot create status dirs in a single transaction with previous request,
@@ -1050,6 +1057,8 @@ String DDLWorker::enqueueQuery(DDLLogEntry & entry)
     /// Se we try to create status dirs here or later when we will execute entry.
     try
     {
+        LOG_INFO(log, "CUSTOM_TRACE ZK_LOG node_path:"+node_path);
+        // 创建query 节点后的active和finished节点，（此处提前把这两个目录路径建好）
         createStatusDirs(node_path, zookeeper);
     }
     catch (...)
@@ -1057,6 +1066,7 @@ String DDLWorker::enqueueQuery(DDLLogEntry & entry)
         LOG_INFO(log, "An error occurred while creating auxiliary ZooKeeper directories in {} . They will be created later. Error : {}", node_path, getCurrentExceptionMessage(true));
     }
 
+    LOG_INFO(log, "CUSTOM_TRACE ZK_LOG end enqueueQuery");
     return node_path;
 }
 

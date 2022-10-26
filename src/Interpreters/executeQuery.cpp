@@ -340,8 +340,8 @@ static void setQuerySpecificSettings(ASTPtr & ast, ContextMutablePtr context)
 }
 
 static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
-    const char * begin,// istr的起始position
-    const char * end,// istr的结束position
+    const char * begin,// 请求sql字符串的起始position
+    const char * end,// 请求sql字符串的结束position
     ContextMutablePtr context, // 全局上下文与此次sql中的设置
     bool internal,// false
     QueryProcessingStage::Enum stage,// QueryProcessingStage::Complete
@@ -577,11 +577,12 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
             // 获取生成当前trace_id和span_id
             OpenTelemetrySpanHolder span("IInterpreter::execute()");
             /**
-             * 执行interpreter解释器，根据ast优化后树生成物理计划
-             * （1）执行从本地磁盘读取数据计划（executeFetchColumns(from_stage, query_plan)）
-             *
+             * 执行interpreter解释器，根据ast优化后树生成物理计划“pipeline”
+             * （此处并未执行该物理计划）
              */
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE interpreter->execute() start");
             res = interpreter->execute();
+            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE interpreter->execute() end ");
         }
 
         // 后续所有逻辑都是按照此pipeline执行

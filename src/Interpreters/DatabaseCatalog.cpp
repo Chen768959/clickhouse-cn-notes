@@ -274,7 +274,7 @@ DatabaseAndTable DatabaseCatalog::getTableImpl(
         if (databases.end() == it)
         {
             if (exception)
-                exception->emplace(ErrorCodes::UNKNOWN_DATABASE, "Database {} doesn't exist", backQuoteIfNeed(table_id.getDatabaseName()));
+            exception->emplace(ErrorCodes::UNKNOWN_DATABASE, "Database {} doesn't exist", backQuoteIfNeed(table_id.getDatabaseName()));
             return {};
         }
         database = it->second;
@@ -651,6 +651,8 @@ bool DatabaseCatalog::isDictionaryExist(const StorageID & table_id) const
 StoragePtr DatabaseCatalog::getTable(const StorageID & table_id, ContextPtr local_context) const
 {
     std::optional<Exception> exc;
+    // 所有dabase和table的Storage对象都已经加载到内存map里了，key是库名或表名，
+    // 此处的table_id其实就是ast树，从里面拿出库名表名后，找到表对应 Storage对象
     auto res = getTableImpl(table_id, local_context, &exc);
     if (!res.second)
         throw Exception(*exc);

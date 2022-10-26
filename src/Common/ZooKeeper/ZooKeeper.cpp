@@ -374,13 +374,15 @@ void ZooKeeper::createIfNotExists(const std::string & path, const std::string & 
         throw KeeperException(code, path);
 }
 
+// 在zk中尝试创建“path”的所有“父节点”
 void ZooKeeper::createAncestors(const std::string & path)
 {
     size_t pos = 1;
     while (true)
     {
+        // 从左到右依次匹配出path中的各个节点名。（匹配到最后一个node则跳出循环，如下）
         pos = path.find('/', pos);
-        if (pos == std::string::npos)
+        if (pos == std::string::npos)// path遍历完毕
             break;
         createIfNotExists(path.substr(0, pos), "");
         ++pos;
@@ -581,15 +583,21 @@ Coordination::Error ZooKeeper::multiImpl(const Coordination::Requests & requests
     if (requests.empty())
         return Coordination::Error::ZOK;
 
+    LOG_INFO(log, "CUSTOM_TRACE ZK_LOG start asyncTryMultiNoThrow");
+
+    // 异步请求的future
     auto future_result = asyncTryMultiNoThrow(requests);
 
+    // 等待异步请求结果
     if (future_result.wait_for(std::chrono::milliseconds(operation_timeout_ms)) != std::future_status::ready)
-    {
+    {// 没有正常响应（如超时）
+        LOG_INFO(log, "CUSTOM_TRACE ZK_LOG end error asyncTryMultiNoThrow");
         impl->finalize();
         return Coordination::Error::ZOPERATIONTIMEOUT;
     }
     else
-    {
+    {// 正常响应
+        LOG_INFO(log, "CUSTOM_TRACE ZK_LOG end success asyncTryMultiNoThrow");
         auto response = future_result.get();
         Coordination::Error code = response.error;
         responses = response.responses;
