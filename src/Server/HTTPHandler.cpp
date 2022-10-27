@@ -770,6 +770,7 @@ void HTTPHandler::processQuery(
     query_scope.emplace(context);
 
     LOG_TRACE(log, "CUSTOM_TRACE IN executeQuery");
+    // 获取查询对应物理计划，并执行物理计划，且往输出流中写入响应结果
     executeQuery(*in, *used_output.out_maybe_delayed_and_compressed, /* allow_into_outfile = */ false, context,
         [&response] (const String & current_query_id, const String & content_type, const String & format, const String & timezone)
         {

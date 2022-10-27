@@ -309,7 +309,7 @@ void TCPHandler::runImpl()
 
             bool may_have_embedded_data = client_tcp_protocol_version >= DBMS_MIN_REVISION_WITH_CLIENT_SUPPORT_EMBEDDED_DATA;
             /// Processing Query
-            // 准备执行计划
+            // 获取查询对应物理计划
             LOG_TRACE(log, "CUSTOM_TRACE START TCPH executeQuery");
             state.io = executeQuery(state.query, query_context, false, state.stage, may_have_embedded_data);
             LOG_TRACE(log, "CUSTOM_TRACE END TCPH executeQuery");

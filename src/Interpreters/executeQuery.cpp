@@ -933,7 +933,15 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     return std::make_tuple(ast, std::move(res));
 }
 
-
+/**
+ * 处理TCP端口请求，
+ * 此处指负责生成对应query的物理计划，并返回，
+ * 至于物理计划的执行触发，由外层逻辑负责
+ * @param query sql
+ * @param context 上下文
+ * @param internal false
+ * @return 物理计划
+ */
 BlockIO executeQuery(
     const String & query,
     ContextMutablePtr context,
@@ -976,7 +984,9 @@ BlockIO executeQuery(
 }
 
 /**
- * HTTPHandler请求时传参
+ * 由HTTPHandler调用，
+ * 此逻辑既负责生成对应query的物理计划，
+ * 也负责触发物理计划的执行，并将响应结果直接写入ostr
  * @param istr socket输入流
  * @param ostr socket输出流
  * @param allow_into_outfile false
@@ -1036,7 +1046,7 @@ void executeQuery(
     BlockIO streams;
 
     /**
-     * 真正执行sql解析的逻辑
+     * 将sql转换层ast对象，且生成对应物理计划streams
      */
     std::tie(ast, streams) = executeQueryImpl(begin, end, context, false, QueryProcessingStage::Complete, may_have_tail, &istr);
 
