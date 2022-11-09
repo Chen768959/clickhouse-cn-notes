@@ -195,8 +195,10 @@ DDLWorker::DDLWorker(
     host_fqdn_id = Cluster::Address::toString(host_fqdn, context->getTCPPort());
 }
 
+// 服务启动时调用
 void DDLWorker::startup()
 {
+    // 将以下两个thread逻辑，交由线程池中线程异步执行
     main_thread = ThreadFromGlobalPool(&DDLWorker::runMainThread, this);
     cleanup_thread = ThreadFromGlobalPool(&DDLWorker::runCleanupThread, this);
 }
@@ -245,6 +247,7 @@ DDLTaskPtr DDLWorker::initAndCheckTask(const String & entry_name, String & out_r
 
     auto task = std::make_unique<DDLTask>(entry_name, entry_path);
 
+    // 从zookeeper上根据ddl请求路径，获取该ddl的实际sql信息
     if (!zookeeper->tryGet(entry_path, node_data))
     {
         /// It is Ok that node could be deleted just now. It means that there are no current host in node's host list.
@@ -314,6 +317,7 @@ static void filterAndSortQueueNodes(Strings & all_nodes)
     std::sort(all_nodes.begin(), all_nodes.end());
 }
 
+// reinitialized：首次运行时为true，后续循环为false
 void DDLWorker::scheduleTasks(bool reinitialized)
 {
     LOG_DEBUG(log, "Scheduling tasks");
@@ -324,6 +328,7 @@ void DDLWorker::scheduleTasks(bool reinitialized)
     /// To avoid duplication of some queries we should try to write execution status again.
     /// To avoid skipping of some entries which were not executed we should be careful when choosing begin_node to start from.
     /// NOTE: It does not protect from all cases of query duplication, see also comments in processTask(...)
+    // 正常情况下此时worker已经进行了初始化，reinitialized为false
     if (reinitialized)
     {
         if (current_tasks.empty())
@@ -372,8 +377,10 @@ void DDLWorker::scheduleTasks(bool reinitialized)
         }
     }
 
+    // 获取zk ddl路径下的所有子节点名（该路径下的每一个节点都代表了一个ddl查询，其内部包含了查询sql、涉及节点信息、各节点查询状态等）
     Strings queue_nodes = zookeeper->getChildren(queue_dir, nullptr, queue_updated_event);
     size_t size_before_filtering = queue_nodes.size();
+    // 剔除其中所有“前缀不为query-”的节点
     filterAndSortQueueNodes(queue_nodes);
     /// The following message is too verbose, but it can be useful too debug mysterious test failures in CI
     LOG_TRACE(log, "scheduleTasks: initialized={}, size_before_filtering={}, queue_size={}, "
@@ -395,7 +402,7 @@ void DDLWorker::scheduleTasks(bool reinitialized)
     /// - in memory tasks (that are currently active or were finished recently)
     /// - failed tasks (that should be processed again)
     auto begin_node = queue_nodes.begin();
-    if (first_failed_task_name)
+    if (first_failed_task_name)// 是否存在失败的task
     {
         /// If we had failed tasks, then we should start from the first failed task.
         assert(reinitialized);
@@ -409,9 +416,27 @@ void DDLWorker::scheduleTasks(bool reinitialized)
             last_task_name = current_tasks.back()->entry_name;
         if (last_skipped_entry_name && last_task_name < *last_skipped_entry_name)
             last_task_name = *last_skipped_entry_name;
+        // 获取最后一个ddl query节点
+        /**
+         * last_task_name是当前执行task队列中的最大位task
+         * queue_nodes为当前zk中所有task的列表，
+         * 此处获取queue_nodes中是否存在大于last_task_name的节点，
+         * 如果不存在，则此处返回的就是last_task_name，
+         * 如果存在，则此处返回zk上“第一个“比last_task_name大的节点。
+         */
         begin_node = std::upper_bound(queue_nodes.begin(), queue_nodes.end(), last_task_name);
     }
 
+    /**
+     * current_tasks中装的都是当前正在执行的task，
+     * queue_nodes中装了zk中所有ddl query的task node，
+     * 每次有新的ddl task进zk，其名称中的数字都是递增的。
+     *
+     * 所以上面的“std::upper_bound(queue_nodes.begin(), queue_nodes.end(), last_task_name);”
+     * 逻辑是在判断当前zk中，有没有比“current_tasks”队列里最大的task还大的node，
+     * 如果没有，就表示没有新的ddl query请求。
+     *
+     */
     if (begin_node == queue_nodes.end())
         LOG_DEBUG(log, "No tasks to schedule");
     else
@@ -447,12 +472,15 @@ void DDLWorker::scheduleTasks(bool reinitialized)
         }
     }));
 
+    // 从begin_node开始遍历，一直遍历到zk上queue_nodes列表的最后一个node
     for (auto it = begin_node; it != queue_nodes.end() && !stop_flag; ++it)
     {
+        // zk node节点的节点名
         String entry_name = *it;
         LOG_TRACE(log, "Checking task {}", entry_name);
 
         String reason;
+        // 根据ddl node名，从zk中get这个node的ddl sql详情，并封装进task（后续会交由线程池或串行执行该ddl sql）
         auto task = initAndCheckTask(entry_name, reason, zookeeper);
         if (!task)
         {
@@ -466,19 +494,21 @@ void DDLWorker::scheduleTasks(bool reinitialized)
 
         if (worker_pool)
         {
+            // 将task交由线程池并发执行
             worker_pool->scheduleOrThrowOnError([this, &saved_task, zookeeper]()
             {
                 setThreadName("DDLWorkerExec");
                 processTask(saved_task, zookeeper);
             });
         }
-        else
+        else// 串行执行，当前ck进程只有执行完该ddl task后，才会for循环执行下一个ddl请求，一定程度上保证了所有ddl请求的有序性
         {
             processTask(saved_task, zookeeper);
         }
     }
 }
 
+// 将task放入current_tasks队列中，并返回此task
 DDLTaskBase & DDLWorker::saveTask(DDLTaskPtr && task)
 {
     current_tasks.remove_if([](const DDLTaskPtr & t) { return t->completely_processed.load(); });
@@ -582,6 +612,7 @@ void DDLWorker::processTask(DDLTaskBase & task, const ZooKeeperPtr & zookeeper)
     LOG_DEBUG(log, "Processing task {} ({})", task.entry_name, task.entry.query);
     assert(!task.completely_processed);
 
+    // 获取此次ddl查询的完整active和finished的zk路径（一直到hosts信息）
     String active_node_path = task.getActiveNodePath();
     String finished_node_path = task.getFinishedNodePath();
 
@@ -593,7 +624,9 @@ void DDLWorker::processTask(DDLTaskBase & task, const ZooKeeperPtr & zookeeper)
     auto active_node = zkutil::EphemeralNodeHolder::existing(active_node_path, *zookeeper);
 
     /// Try fast path
+    // zk创建此次查询的active node，表示该查询正在执行
     auto create_active_res = zookeeper->tryCreate(active_node_path, {}, zkutil::CreateMode::Ephemeral);
+    // 如果zk active node创建失败
     if (create_active_res != Coordination::Error::ZOK)
     {
         if (create_active_res != Coordination::Error::ZNONODE && create_active_res != Coordination::Error::ZNODEEXISTS)
@@ -639,6 +672,7 @@ void DDLWorker::processTask(DDLTaskBase & task, const ZooKeeperPtr & zookeeper)
     }
 
     /// Step 2: Execute query from the task.
+    // 执行task
     if (!task.was_executed)
     {
         /// If table and database engine supports it, they will execute task.ops by their own in a single transaction
@@ -1070,7 +1104,7 @@ String DDLWorker::enqueueQuery(DDLLogEntry & entry)
     return node_path;
 }
 
-
+// 确保zk中ddl-queue 路径存在。设置initialized标识为true
 bool DDLWorker::initializeMainThread()
 {
     assert(!initialized);
@@ -1111,11 +1145,13 @@ bool DDLWorker::initializeMainThread()
 
 void DDLWorker::runMainThread()
 {
+    // DDLWorker的重置逻辑，在后续ddl work执行异常时会被调用
     auto reset_state = [&]()
     {
         initialized = false;
         /// It will wait for all threads in pool to finish and will not rethrow exceptions (if any).
         /// We create new thread pool to forget previous exceptions.
+        // 如果ddl worker pool_size配置大于一，则创建线程池，由线程池处理各个ddl请求。（否则所有ddl请求会排队依次执行）
         if (1 < pool_size)
             worker_pool = std::make_unique<ThreadPool>(pool_size);
         /// Clear other in-memory state, like server just started.
@@ -1128,22 +1164,27 @@ void DDLWorker::runMainThread()
     setThreadName("DDLWorker");
     LOG_DEBUG(log, "Starting DDLWorker thread");
 
+    // 开始死循环，除非ddl worker的shutdown方法被调用，否则stop_flag恒为true
     while (!stop_flag)
     {
         try
         {
+            // 首次运行需要初始化
             bool reinitialized = !initialized;
 
             /// Reinitialize DDLWorker state (including ZooKeeper connection) if required
+            // 如果未进行初始化，则先调用initializeMainThread()方法进行初始化
             if (!initialized)
             {
                 /// Stopped
+                // 确保zk中ddl-queue 路径存在。设置initialized标识为true
                 if (!initializeMainThread())
-                    break;
+                    break;// 如果stop_flag为true，则此处执行初始化会返回false，此处则跳出循环
                 LOG_DEBUG(log, "Initialized DDLWorker thread");
             }
 
             cleanup_event->set();
+            // 首次运行时为true，后续循环为false
             scheduleTasks(reinitialized);
 
             LOG_DEBUG(log, "Waiting for queue updates");
