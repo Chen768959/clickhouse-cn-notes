@@ -543,6 +543,7 @@ bool DDLWorker::tryExecuteQuery(const String & query, DDLTaskBase & task, const 
         auto query_context = task.makeQueryContext(context, zookeeper);
         if (!task.is_initial_query)
             query_scope.emplace(query_context);
+        // 模拟http请求，调用对应sql执行接口
         executeQuery(istr, ostr, !task.is_initial_query, query_context, {});
 
         if (auto txn = query_context->getZooKeeperMetadataTransaction())
@@ -607,12 +608,18 @@ void DDLWorker::updateMaxDDLEntryID(const String & entry_name)
     }
 }
 
+/**
+ * 由ddlWorker主线程调用，
+ * 传入并执行封装好的ddl task对象
+ * @param task 包含了ddl sql ast树，此query对应zk上各node路径等信息
+ * @param zookeeper zk
+ */
 void DDLWorker::processTask(DDLTaskBase & task, const ZooKeeperPtr & zookeeper)
 {
     LOG_DEBUG(log, "Processing task {} ({})", task.entry_name, task.entry.query);
     assert(!task.completely_processed);
 
-    // 获取此次ddl查询的完整active和finished的zk路径（一直到hosts信息）
+    // 获取此次ddl查询，对应的完整active和finished的node zk路径（此时路径不一定存在，此处只是完整路径的字符串名）
     String active_node_path = task.getActiveNodePath();
     String finished_node_path = task.getFinishedNodePath();
 
@@ -679,6 +686,7 @@ void DDLWorker::processTask(DDLTaskBase & task, const ZooKeeperPtr & zookeeper)
         /// with other zk operations (such as appending something to ReplicatedMergeTree log, or
         /// updating metadata in Replicated database), so we make create request for finished_node_path with status "0",
         /// which means that query executed successfully.
+        // 提前准备后续执行成功后zk的操作，删除active node信息，创建finished信息。因为这两个行为存在事务性，所以此处放入队列，后续事务的去执行
         task.ops.emplace_back(zkutil::makeRemoveRequest(active_node_path, -1));
         task.ops.emplace_back(zkutil::makeCreateRequest(finished_node_path, ExecutionStatus(0).serializeText(), zkutil::CreateMode::Persistent));
 
@@ -707,6 +715,7 @@ void DDLWorker::processTask(DDLTaskBase & task, const ZooKeeperPtr & zookeeper)
             else
             {
                 storage.reset();
+                // 模拟http请求，调用http请求的sql处理逻辑接口
                 tryExecuteQuery(rewritten_query, task, zookeeper);
             }
         }
@@ -751,6 +760,8 @@ void DDLWorker::processTask(DDLTaskBase & task, const ZooKeeperPtr & zookeeper)
     bool status_written = task.ops.empty();
     if (!status_written)
     {
+        // 主要是执行上面准备好的“删除active node信息，创建finished node信息”这两步zk操作
+        // multi中包含事务特性，可保证task.ops队列中的操作事务执行
         zookeeper->multi(task.ops);
         task.ops.clear();
     }
@@ -965,6 +976,8 @@ void DDLWorker::cleanupQueue(Int64, const ZooKeeperPtr & zookeeper)
             if (!zookeeper->exists(node_path, &stat))
                 continue;
 
+            // 判断当前zk ddl queue队列中task数目是否到达上限
+            // 只有到达某个上限才会清除zk中queuq目录中的历史ddl task节点
             if (!canRemoveQueueEntry(node_name, stat))
                 continue;
 
@@ -1018,6 +1031,7 @@ void DDLWorker::cleanupQueue(Int64, const ZooKeeperPtr & zookeeper)
     }
 }
 
+// 判断当前zk ddl queue队列中task数目是否到达上限
 bool DDLWorker::canRemoveQueueEntry(const String & entry_name, const Coordination::Stat & stat)
 {
     /// Delete node if its lifetime is expired (according to task_max_lifetime parameter)
@@ -1174,7 +1188,7 @@ void DDLWorker::runMainThread()
 
             /// Reinitialize DDLWorker state (including ZooKeeper connection) if required
             // 如果未进行初始化，则先调用initializeMainThread()方法进行初始化
-            if (!initialized)
+            if (!initialized)a
             {
                 /// Stopped
                 // 确保zk中ddl-queue 路径存在。设置initialized标识为true
@@ -1185,6 +1199,7 @@ void DDLWorker::runMainThread()
 
             cleanup_event->set();
             // 首次运行时为true，后续循环为false
+            // 不断从zk中获取当前ddl task队列，然后执行其中的各个task
             scheduleTasks(reinitialized);
 
             LOG_DEBUG(log, "Waiting for queue updates");
@@ -1243,6 +1258,7 @@ void DDLWorker::runCleanupThread()
             if (zookeeper->expired())
                 continue;
 
+            // 根据当前时间
             cleanupQueue(current_time_seconds, zookeeper);
             last_cleanup_time_seconds = current_time_seconds;
         }
