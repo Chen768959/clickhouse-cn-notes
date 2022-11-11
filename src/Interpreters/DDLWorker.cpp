@@ -1083,7 +1083,7 @@ void DDLWorker::createStatusDirs(const std::string & node_path, const ZooKeeperP
     zkutil::KeeperMultiException::check(code, ops, responses);
 }
 
-
+// 在zk上创建ddl请求对应的ddl task
 String DDLWorker::enqueueQuery(DDLLogEntry & entry)
 {
     LOG_INFO(log, "CUSTOM_TRACE ZK_LOG start enqueueQuery");
@@ -1092,12 +1092,18 @@ String DDLWorker::enqueueQuery(DDLLogEntry & entry)
 
     auto zookeeper = getAndSetZooKeeper();
 
+    // 当前zk上ddl task的前缀及其路径
     String query_path_prefix = fs::path(queue_dir) / "query-";
-    // 创建query_path_prefix中所有父节点，也就是尝试创建 “fs::path(queue_dir)”中的各个node
-    LOG_INFO(log, "CUSTOM_TRACE ZK_LOG query_path_prefix:"+query_path_prefix);
+    // 确保该ddl task的父路径都已创建
     zookeeper->createAncestors(query_path_prefix);
 
     // 创建 "query-"这个node（此时该node的父node均已创建）
+    /**
+     * 在ck上创建ddl task节点，
+     * 完整的节点名为“query-xxxxxx”，query-后面跟着一串数字，
+     * 每次新的ddl请求，其task的数字是不断递增的。
+     * 所以此处选择的“zkutil::CreateMode::PersistentSequential”模式，表示新创建的节点其数组顺序递增
+     */
     String node_path = zookeeper->create(query_path_prefix, entry.toString(), zkutil::CreateMode::PersistentSequential);
 
     /// We cannot create status dirs in a single transaction with previous request,
@@ -1106,7 +1112,7 @@ String DDLWorker::enqueueQuery(DDLLogEntry & entry)
     try
     {
         LOG_INFO(log, "CUSTOM_TRACE ZK_LOG node_path:"+node_path);
-        // 创建query 节点后的active和finished节点，（此处提前把这两个目录路径建好）
+        // 创建query 节点后的active和finished节点
         createStatusDirs(node_path, zookeeper);
     }
     catch (...)
@@ -1188,7 +1194,7 @@ void DDLWorker::runMainThread()
 
             /// Reinitialize DDLWorker state (including ZooKeeper connection) if required
             // 如果未进行初始化，则先调用initializeMainThread()方法进行初始化
-            if (!initialized)a
+            if (!initialized)
             {
                 /// Stopped
                 // 确保zk中ddl-queue 路径存在。设置initialized标识为true

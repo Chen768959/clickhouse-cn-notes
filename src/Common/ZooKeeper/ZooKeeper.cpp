@@ -797,6 +797,10 @@ std::future<Coordination::CreateResponse> ZooKeeper::asyncTryCreateNoThrow(const
         promise->set_value(response);
     };
 
+    //const int CreateMode::Persistent = 0;
+    //const int CreateMode::Ephemeral = 1;
+    //const int CreateMode::PersistentSequential = 2;
+    //const int CreateMode::EphemeralSequential = 3;
     impl->create(path, data, mode & 1, mode & 2, {}, std::move(callback));
     return future;
 }
