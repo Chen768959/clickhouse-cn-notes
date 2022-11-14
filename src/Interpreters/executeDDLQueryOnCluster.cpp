@@ -98,8 +98,8 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
     ClusterPtr cluster = context->getCluster(query->cluster);
 
     /**
-     * 所有分布式ddl操作都是通过DDLWorker异步执行的。
-     * 其内部存在队列，会判断执行顺序
+     * 所有分布式ddl操作都是通过调用DDLWorker内接口实现。
+     * 无论是提交ddl任务，还是其内部自动异步执行ddl任务
      */
     DDLWorker & ddl_worker = context->getDDLWorker();
 
@@ -179,6 +179,7 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
     // 检查用户是否拥有“query_requires_access”中必须的所有权限项
     context->checkAccess(query_requires_access);
 
+    // 封装此次的分布式ddl sql
     DDLLogEntry entry;
     entry.hosts = std::move(hosts);
     entry.query = queryToString(query_ptr);
@@ -293,12 +294,15 @@ std::pair<String, UInt16> DDLQueryStatusInputStream::parseHostAndPort(const Stri
     return {host, port};
 }
 
+// 会被外部多次调用
 Block DDLQueryStatusInputStream::readImpl()
 {
     Block res;
     bool all_hosts_finished = num_hosts_finished >= waiting_hosts.size();
     /// Seems like num_hosts_finished cannot be strictly greater than waiting_hosts.size()
     assert(num_hosts_finished <= waiting_hosts.size());
+    // 此处查询涉及的主机均已存在于finished node中（ddl query均已完成）
+    // 或超时
     if (all_hosts_finished || timeout_exceeded)
     {
         bool throw_if_error_on_host = context->getSettingsRef().distributed_ddl_output_mode != DistributedDDLOutputMode::NEVER_THROW;
@@ -311,8 +315,13 @@ Block DDLQueryStatusInputStream::readImpl()
     auto zookeeper = context->getZooKeeper();
     size_t try_number = 0;
 
+    // 获取fnished路径下“新产生”的host信息
+    // res.rows() == 0：即finished还没有新host，会一直循环等待出现新的完成ddl task的主机
+    // 当前readImpl()会被外部多次调用，所以每一次调用都是获取新的完成ddl task的主机信息
+    // 当所有主机都完成后，就返回上面的空格Block res
     while (res.rows() == 0)
     {
+        // 人为取消
         if (isCancelled())
         {
             bool throw_if_error_on_host = context->getSettingsRef().distributed_ddl_output_mode != DistributedDDLOutputMode::NEVER_THROW;
@@ -322,6 +331,7 @@ Block DDLQueryStatusInputStream::readImpl()
             return res;
         }
 
+        // 超时
         if (timeout_seconds >= 0 && watch.elapsedSeconds() > timeout_seconds)
         {
             size_t num_unfinished_hosts = waiting_hosts.size() - num_hosts_finished;
@@ -371,14 +381,18 @@ Block DDLQueryStatusInputStream::readImpl()
                             node_path);
         }
 
+        // 判断是否有新的执行完毕的host主机
+        // 每次循环至此都判断当前zk finished目录中是否有新出现的host，并获取
         Strings new_hosts = getNewAndUpdate(getChildrenAllowNoNode(zookeeper, fs::path(node_path) / "finished"));
         ++try_number;
         if (new_hosts.empty())
             continue;
 
+        // 获取当前还有那些主机还在执行ddl task
         current_active_hosts = getChildrenAllowNoNode(zookeeper, fs::path(node_path) / "active");
 
         MutableColumns columns = sample.cloneEmptyColumns();
+        // 构建新完成ddl atsk的主机信息响应结果
         for (const String & host_id : new_hosts)
         {
             ExecutionStatus status(-1, "Cannot obtain error message");
@@ -419,11 +433,18 @@ Strings DDLQueryStatusInputStream::getChildrenAllowNoNode(const std::shared_ptr<
     return res;
 }
 
+/**
+ * 和缓存finished_hosts做对比后更新缓存，并返回finished路径下新的host
+ * @param current_list_of_finished_hosts 当前时刻fished目录中包含的所有host
+ * @return finished中新出现的host
+ */
 Strings DDLQueryStatusInputStream::getNewAndUpdate(const Strings & current_list_of_finished_hosts)
 {
     Strings diff;
+    // 遍历finished最新hosts
     for (const String & host : current_list_of_finished_hosts)
     {
+        // count：返回host在set集合中的出现次数
         if (!waiting_hosts.count(host))
         {
             if (!ignoring_hosts.count(host))
@@ -434,6 +455,8 @@ Strings DDLQueryStatusInputStream::getNewAndUpdate(const Strings & current_list_
             continue;
         }
 
+        // 缓存中的finished_hosts中如果不包含此当前host
+        // 则更新finished_hosts缓存，并将此host装入diff
         if (!finished_hosts.count(host))
         {
             diff.emplace_back(host);
