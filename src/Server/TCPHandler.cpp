@@ -321,28 +321,23 @@ void TCPHandler::runImpl()
 
             if (state.io.out)
             {
-                LOG_TRACE(log, "CUSTOM_TRACE START TCPH state.io.out processInsertQuery");
                 state.need_receive_data_for_insert = true;
                 processInsertQuery(connection_settings);
-                LOG_TRACE(log, "CUSTOM_TRACE END TCPH state.io.out processInsertQuery");
             }
             else if (state.need_receive_data_for_input) // It implies pipeline execution
             {
-                LOG_TRACE(log, "CUSTOM_TRACE START TCPH pipeline execution");
                 /// It is special case for input(), all works for reading data from client will be done in callbacks.
                 auto executor = state.io.pipeline.execute();
                 executor->execute(state.io.pipeline.getNumThreads());
-                LOG_TRACE(log, "CUSTOM_TRACE END TCPH pipeline execution");
             }
             else if (state.io.pipeline.initialized()){// 一般情况下的主要运行逻辑
-                LOG_TRACE(log, "CUSTOM_TRACE START TCPH processOrdinaryQueryWithProcessors");
                 processOrdinaryQueryWithProcessors();
-                LOG_TRACE(log, "CUSTOM_TRACE END TCPH processOrdinaryQueryWithProcessors");
             }
             else if (state.io.in){
-                LOG_TRACE(log, "CUSTOM_TRACE START TCPH processOrdinaryQuery");
+                // 循环调用state.io.in->read() -》readImpl()
+                // 不断循环获取InputStream中的block结果，每次获取到block后都通过socket out对外输出
+                // 直到InputStream返回空block标志着整个循环结束，所有input结果均已输出。
                 processOrdinaryQuery();
-                LOG_TRACE(log, "CUSTOM_TRACE START TCPH processOrdinaryQuery");
             }
 
             state.io.onFinish();
@@ -612,7 +607,8 @@ void TCPHandler::processOrdinaryQuery()
         /// Use of async mode here enables reporting progress and monitoring client cancelling the query
         AsynchronousBlockInputStream async_in(state.io.in);// 抽象的异步执行查询的流
 
-        async_in.readPrefix();//开始
+        // 线程池异步请求 state.io.in->read()，获取block结果后装入async_in.block种
+        async_in.readPrefix();
         while (true)
         {
             if (isQueryCancelled())
@@ -630,9 +626,19 @@ void TCPHandler::processOrdinaryQuery()
 
             sendLogs();
 
+            // 等待AsynchronousBlockInputStream::next()->异步calculate()结束
             if (async_in.poll(query_context->getSettingsRef().interactive_delay / 1000))
             {
+                // 本质是获取异步calculate()的结果，也就是获取（内部inputStream实现类）state.io.in->read()->readImpl()的结果
                 const auto block = async_in.read();
+
+                /**
+                 * 由以下这个逻辑可看出：
+                 * 1、底层state.io.in->read()->readImpl()获取block结果不是一次性获取所有结果，
+                 *   可能是每次循环调用返回部分结果。
+                 * 2、只有当state.io.in->read()->readImpl()返回空block时才会终止此处的循环，
+                 *    事实上各个InputStream实现类的readImpl逻辑也是以返回空block视为结束
+                 */
                 if (!block)
                     break;
 
@@ -1494,9 +1500,10 @@ bool TCPHandler::isQueryCancelled()
     return false;
 }
 
-
+// 通过socket out，对外输出block内容
 void TCPHandler::sendData(const Block & block)
 {
+    // 初始化state.block_out
     initBlockOutput(block);
 
     auto prev_bytes_written_out = out->count();

@@ -587,7 +587,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
         // 后续所有逻辑都是按照此pipeline执行
         QueryPipeline & pipeline = res.pipeline;
-        bool use_processors = pipeline.initialized();// 判断pipeline是否为空，正常情况下为true
+        bool use_processors = pipeline.initialized();// 判断pipeline是否为空
 
         if (const auto * insert_interpreter = typeid_cast<const InterpreterInsertQuery *>(&*interpreter))
         {
@@ -610,6 +610,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         /// Hold element of process list till end of query execution.
         res.process_list_entry = process_list_entry;
 
+        // BlockIO中存在pipeline，则直接从pipeline中获取结果
         if (use_processors)
         {
             /// Limits on the result, the quota on the result, and also callback for progress.
@@ -627,7 +628,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 });
             }
         }
-        else// pipeline为空
+        else// pipeline为空，则从inputStream或outputStream中获取结果
         {
             /// Limits on the result, the quota on the result, and also callback for progress.
             /// Limits apply only to the final result.

@@ -73,6 +73,7 @@ public:
             started = true;
         }
 
+        // 等待calculate()完毕
         return ready.tryWait(milliseconds);
     }
 
