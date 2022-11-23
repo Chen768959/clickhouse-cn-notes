@@ -24,6 +24,7 @@ BlockIO InterpreterOptimizeQuery::execute()
 {
     const auto & ast = query_ptr->as<ASTOptimizeQuery &>();
 
+    // 包含custer一律走cluster逻辑
     if (!ast.cluster.empty())
         return executeDDLQueryOnCluster(query_ptr, getContext(), getRequiredAccess());
 

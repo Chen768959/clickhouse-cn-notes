@@ -400,11 +400,14 @@ SelectPartsDecision MergeTreeDataMergerMutator::selectAllPartsToMergeWithinParti
     String * out_disable_reason,
     bool optimize_skip_merged_partitions)
 {
+    // 获取partition下的所有待合并小part文件
     MergeTreeData::DataPartsVector parts = selectAllPartsFromPartition(partition_id);
 
+    // 没有part
     if (parts.empty())
         return SelectPartsDecision::CANNOT_SELECT;
 
+    // 只有一个part（没加final）
     if (!final && parts.size() == 1)
     {
         if (out_disable_reason)
@@ -423,6 +426,7 @@ SelectPartsDecision MergeTreeDataMergerMutator::selectAllPartsToMergeWithinParti
     auto it = parts.begin();
     auto prev_it = it;
 
+    // 遍历u偶有part，统计出总bytes大小
     UInt64 sum_bytes = 0;
     while (it != parts.end())
     {
@@ -439,6 +443,7 @@ SelectPartsDecision MergeTreeDataMergerMutator::selectAllPartsToMergeWithinParti
     }
 
     /// Enough disk space to cover the new merge with a margin.
+    // 确保磁盘空间足够合并
     auto required_disk_space = sum_bytes * DISK_USAGE_COEFFICIENT_TO_SELECT;
     if (available_disk_space <= required_disk_space)
     {
@@ -466,7 +471,7 @@ SelectPartsDecision MergeTreeDataMergerMutator::selectAllPartsToMergeWithinParti
     future_part.assign(std::move(parts));
 
     available_disk_space -= required_disk_space;
-    return SelectPartsDecision::SELECTED;
+    return SelectPartsDecision::SELECTED;// 返回查询完毕的标识
 }
 
 

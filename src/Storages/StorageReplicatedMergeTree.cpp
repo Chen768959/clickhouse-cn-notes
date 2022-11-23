@@ -3314,7 +3314,8 @@ void StorageReplicatedMergeTree::mergeSelectingTask()
                 future_merged_part.uuid = UUIDHelpers::generateV4();
 
             if (max_source_parts_size_for_merge > 0 &&
-                merger_mutator.selectPartsToMerge(future_merged_part, false, max_source_parts_size_for_merge, merge_pred, merge_with_ttl_allowed, nullptr) == SelectPartsDecision::SELECTED)
+                merger_mutator.selectPartsToMerge(future_merged_part, false, max_source_parts_size_for_merge,
+                                                  merge_pred, merge_with_ttl_allowed, nullptr) == SelectPartsDecision::SELECTED)
             {
                 create_result = createLogEntryToMergeParts(
                     zookeeper,
@@ -3418,11 +3419,13 @@ StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::c
     int32_t log_version,
     MergeType merge_type)
 {
+    // 判断需要合并的partition是否都已记录在zk上
     std::vector<std::future<Coordination::ExistsResponse>> exists_futures;
     exists_futures.reserve(parts.size());
     for (const auto & part : parts)
         exists_futures.emplace_back(zookeeper->asyncExists(fs::path(replica_path) / "parts" / part->name));
 
+    // 如果存在partition在zk上找不到的情况，则不合并
     bool all_in_zk = true;
     for (size_t i = 0; i < parts.size(); ++i)
     {
@@ -3439,10 +3442,10 @@ StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::c
             }
         }
     }
-
     if (!all_in_zk)
         return CreateMergeEntryResult::MissingPart;
 
+    // zk上log-xxxxx节点中的信息，均为merge_parts需要
     ReplicatedMergeTreeLogEntryData entry;
     entry.type = LogEntry::MERGE_PARTS;
     entry.source_replica = replica_name;
@@ -3467,9 +3470,10 @@ StorageReplicatedMergeTree::CreateMergeEntryResult StorageReplicatedMergeTree::c
     ops.emplace_back(zkutil::makeSetRequest(
         fs::path(zookeeper_path) / "log", "", log_version)); /// Check and update version.
 
+    // 在zk上连续执行ops队列中的命令，在创建log目录下创建log-xxxxx节点，内部写入上面定义的merge_parts所需的各种信息
     Coordination::Error code = zookeeper->tryMulti(ops, responses);
 
-    if (code == Coordination::Error::ZOK)
+    if (code == Coordination::Error::ZOK)// 创建成功
     {
         String path_created = dynamic_cast<const Coordination::CreateResponse &>(*responses.front()).path_created;
         entry.znode_name = path_created.substr(path_created.find_last_of('/') + 1);
@@ -4610,16 +4614,21 @@ bool StorageReplicatedMergeTree::optimize(
         const auto storage_settings_ptr = getSettings();
         auto metadata_snapshot = getInMemoryMetadataPtr();
 
+        // 如果没有指定partition则获取所有的parts，然后合并
         if (!partition && final)
         {
+            // 获取当前节点上的所有artition的列表
             DataPartsVector data_parts = getDataPartsVector();
+            // partitions id
             std::unordered_set<String> partition_ids;
 
             for (const DataPartPtr & part : data_parts)
                 partition_ids.emplace(part->info.partition_id);
 
+            // 获取磁盘空余空间
             UInt64 disk_space = getStoragePolicy()->getMaxUnreservedFreeSpace();
 
+            // 遍历每一个partition
             for (const String & partition_id : partition_ids)
             {
                 size_t try_no = 0;
@@ -4635,13 +4644,16 @@ bool StorageReplicatedMergeTree::optimize(
                     if (storage_settings.get()->assign_part_uuids)
                         future_merged_part.uuid = UUIDHelpers::generateV4();
 
+                    // 查询当前Partition下所有待合并的part小文件，并装入future_merged_part
                     SelectPartsDecision select_decision = merger_mutator.selectAllPartsToMergeWithinPartition(
                         future_merged_part, disk_space, can_merge, partition_id, true, metadata_snapshot, nullptr, query_context->getSettingsRef().optimize_skip_merged_partitions);
 
-                    if (select_decision != SelectPartsDecision::SELECTED)
+                    if (select_decision != SelectPartsDecision::SELECTED)// 只要标识不是查询完毕，都表示当前partition_id中的parts还不能merge
                         break;
 
                     ReplicatedMergeTreeLogEntryData merge_entry;
+                    // 在zk的log目录下创建log-xxxxx节点，其中保存所有待merge的part名以及合并相关信息，后续各主机可根据此log另行merge
+                    // 再将zk的log对象赋值回merge_entry，可更具merge_entry监控zk上的log节点merge进展
                     CreateMergeEntryResult create_result = createLogEntryToMergeParts(
                         zookeeper, future_merged_part.parts,
                         future_merged_part.name, future_merged_part.uuid, future_merged_part.type,
@@ -4654,6 +4666,7 @@ bool StorageReplicatedMergeTree::optimize(
                     if (create_result == CreateMergeEntryResult::LogUpdated)
                         continue;
 
+                    // 将zk log节点对象装入队列，待后续统一监控log merge进展
                     merge_entries.push_back(std::move(merge_entry));
                     break;
                 }
@@ -4662,8 +4675,15 @@ bool StorageReplicatedMergeTree::optimize(
                         + toString(max_retries) + " tries");
             }
         }
-        else
+        else // 指定partition时，则只合并指定的partition
         {
+            /**
+             * 整体逻辑与上面相似，
+             * 都是先获取partition下所有待mege的parts
+             * 然后在zk上创建对应log节点，其中包含所有parts信息，
+             * 最后将log节点对象装入merge_entries队列，以便后续监控log merge进展
+             */
+
             size_t try_no = 0;
             for (; try_no < max_retries; ++try_no)
             {
@@ -4728,6 +4748,8 @@ bool StorageReplicatedMergeTree::optimize(
     if (query_context->getSettingsRef().replication_alter_partitions_sync != 0)
     {
         /// NOTE Table lock must not be held while waiting. Some combination of R-W-R locks from different threads will yield to deadlock.
+        // 监控zk log节点的merge进展，
+        // 每一个merge_entry代表了一个partition的合并log节点，此处等待所有log节点merge完毕
         for (auto & merge_entry : merge_entries)
             waitForAllReplicasToProcessLogEntry(merge_entry, false);
     }

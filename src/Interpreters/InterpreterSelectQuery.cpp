@@ -600,8 +600,10 @@ BlockIO InterpreterSelectQuery::execute()
     BlockIO res;
     QueryPlan query_plan;
 
+    // 根据内部ast构建queryPlan
     buildQueryPlan(query_plan);
 
+    // 利用queryPlan生成pipeline物理计划，
     res.pipeline = std::move(*query_plan.buildQueryPipeline(
         QueryPlanOptimizationSettings::fromContext(context), BuildQueryPipelineSettings::fromContext(context)));
 
@@ -1059,6 +1061,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             }
         };
 
+        // stage逻辑正确性验证
         if (intermediate_stage)
         {
             if (expressions.first_stage || expressions.second_stage)
@@ -1074,7 +1077,6 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             if (intermediate_stage || expressions.first_stage || expressions.second_stage)
                 throw Exception("Query with after aggregation stage cannot have any other stages", ErrorCodes::LOGICAL_ERROR);
         }
-
 
         if (expressions.first_stage)
         {
