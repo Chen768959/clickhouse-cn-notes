@@ -518,9 +518,10 @@ QueryProcessingStage::Enum StorageDistributed::getQueryProcessingStage(
         }
     }
 
+    // 如果设置distributed_group_by_no_merge参数，默认false
     if (settings.distributed_group_by_no_merge)
     {
-        if (settings.distributed_group_by_no_merge == DISTRIBUTED_GROUP_BY_NO_MERGE_AFTER_AGGREGATION)
+        if (settings.distributed_group_by_no_merge == DISTRIBUTED_GROUP_BY_NO_MERGE_AFTER_AGGREGATION)// 2
         {
             if (settings.distributed_push_down_limit)
                 return QueryProcessingStage::WithMergeableStateAfterAggregationAndLimit;
@@ -590,6 +591,7 @@ void StorageDistributed::read(
     const size_t /*max_block_size*/,
     const unsigned /*num_streams*/)
 {
+    // 获取查询local表的sql，主要就是将原有distracted sql的库名表名替换成local的库名表名
     const auto & modified_query_ast = rewriteSelectQuery(
         query_info.query, remote_database, remote_table, remote_table_function_ptr);
 
@@ -624,6 +626,7 @@ void StorageDistributed::read(
             has_virtual_shard_num_column,
             local_context->getExternalTables());
 
+    // 构建分布式表的远程子查询plan与本地子查询plan，并包装一层union-plan
     ClusterProxy::executeQuery(query_plan, select_stream_factory, log,
         modified_query_ast, local_context, query_info,
         sharding_key_expr, sharding_key_column_name,

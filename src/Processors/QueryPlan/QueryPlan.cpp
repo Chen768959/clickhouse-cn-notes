@@ -104,6 +104,7 @@ void QueryPlan::addStep(QueryPlanStepPtr step)
             throw Exception("Cannot add step " + step->getName() + " to QueryPlan because "
                             "step has no inputs, but QueryPlan is already initialized", ErrorCodes::LOGICAL_ERROR);
 
+        // 初始化root根节点
         nodes.emplace_back(Node{.step = std::move(step)});
         root = &nodes.back();
         return;
@@ -142,36 +143,65 @@ QueryPipelinePtr QueryPlan::buildQueryPipeline(
 
     struct Frame
     {
+        // step-plan node
         Node * node = {};
+        // pipeine队列
         QueryPipelines pipelines = {};
     };
 
     QueryPipelinePtr last_pipeline;
 
+    // 创建栈容器
     std::stack<Frame> stack;
+    // 将plan-tree根节点压入栈
     stack.push(Frame{.node = root});
 
+    /**
+     * 从step-plan树的根节点开始，
+     * 先把根节点压入栈中，再判断是否有子节点，
+     * 如果存在子节点，则直接进行下次循环，再把子节点也压入栈中，再判断是否有子节点。。
+     * 依次循环，直到找到step-plan叶子节点
+     *
+     * 然后再从栈顶的叶子step-plan节点开始，把step-plan转化成pipelines。
+     * 再出栈丢弃，继续找叶子节点的父step-plan节点，继续上面的子节点判断，如果还有子节点则继续压入子节点，并将刚刚叶子节点的pipelines传入
+     * 每一次生成step-plan生成pipeline，同时其中还包含了子节点pipeline的逻辑。
+     * frame.node->step->updatePipeline(std::move(frame.pipelines), build_pipeline_settings);
+     *
+     * 最终将一个step-plan-tree转化成了一个pipeline对象。
+     */
     while (!stack.empty())
     {
+        // 出栈一个frame。这个frame为刚刚压进来的当前最末端step节点（第一次循环是根step，第二次是根节点的子step。。。）
         auto & frame = stack.top();
 
+        // 本质上是当前node的子step-node的pipeline
+        // 如果存在则表示子node已经被处理过了，
+        // 此处将子pipline和当前node放在一起
         if (last_pipeline)
         {
             frame.pipelines.emplace_back(std::move(last_pipeline));
             last_pipeline = nullptr; //-V1048
         }
 
+        // 预计算当前step-node的下一个child pipeline的index
         size_t next_child = frame.pipelines.size();
+
+        // 叶子节点其二者皆为0
+        // 其余节点相等的话，就表示子节点的pipelines均被解析出来了，子pipelines和child-step-nodes数也能对的上。那么就解析当前step-node为pipline
+        // 上面两点均不满足，则表示“next_child”index位的子节点还未解析，继续把该子节点入栈解析。
         if (next_child == frame.node->children.size())
         {
             bool limit_max_threads = frame.pipelines.empty();
+            // 将当前step node转化为last_pipeline，并将当前step-node中的子节点pipelines作为参数传入
             last_pipeline = frame.node->step->updatePipeline(std::move(frame.pipelines), build_pipeline_settings);
 
             if (limit_max_threads && max_threads)
                 last_pipeline->limitMaxThreads(max_threads);
 
+            // 已经获得了当前节点的pipeline，所以当前step node就无用了，出栈丢弃。
             stack.pop();
         }
+        // 将当前setp node的子node压入栈中
         else
             stack.push(Frame{.node = frame.node->children[next_child]});
     }

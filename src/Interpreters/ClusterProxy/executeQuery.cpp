@@ -99,6 +99,7 @@ ContextMutablePtr updateSettingsForCluster(const Cluster & cluster, ContextPtr c
     return new_context;
 }
 
+// 构建分布式表的远程子查询plan与本地子查询plan，并包装一层union-plan
 void executeQuery(
     QueryPlan & query_plan,
     IStreamFactory & stream_factory, Poco::Logger * log,
@@ -140,6 +141,8 @@ void executeQuery(
         throttler = user_level_throttler;
 
     size_t shards = query_info.getCluster()->getShardCount();
+
+    // 遍历每一个shard信息，然后交由stream_factory创建对应的查询step-plan
     for (const auto & shard_info : query_info.getCluster()->getShardsInfo())
     {
         ASTPtr query_ast_for_shard;
@@ -160,12 +163,16 @@ void executeQuery(
         else
             query_ast_for_shard = query_ast;
 
+        // 创建指定shard的查询sql
+        // 如果该shard是本机shard，则直接创建查询的step-plan，并装入plans中。
+        // 如果该shard是远程shard，或delayed_shard，则返回对应pipe逻辑
         stream_factory.createForShard(shard_info,
             query_ast_for_shard,
             new_context, throttler, query_info, plans,
             remote_pipes, delayed_pipes, log);
     }
 
+    // 如存在远程表的pipe处理逻辑，创建对应plan
     if (!remote_pipes.empty())
     {
         auto plan = std::make_unique<QueryPlan>();

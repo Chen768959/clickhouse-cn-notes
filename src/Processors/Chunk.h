@@ -29,6 +29,8 @@ using ChunkInfoPtr = std::shared_ptr<const ChunkInfo>;
  * It may be useful if additional info per chunk is needed. For example, bucket number for aggregated data.
 **/
 
+// 包含了实际的数据。
+// 包含了n行m列数据
 class Chunk
 {
 public:

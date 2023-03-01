@@ -42,6 +42,7 @@ MergingAggregatedStep::MergingAggregatedStep(
 
 void MergingAggregatedStep::transformPipeline(QueryPipeline & pipeline, const BuildQueryPipelineSettings &)
 {
+    // memory_efficient_aggregation：是否启用distribute-sql的内存节省功能。默认true
     if (!memory_efficient_aggregation)
     {
         /// We union several sources into one, paralleling the work.

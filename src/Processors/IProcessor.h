@@ -183,7 +183,9 @@ public:
     using PortNumbers = std::vector<UInt64>;
 
     /// Optimization for prepare in case we know ports were updated.
-    virtual Status prepare(const PortNumbers & /*updated_input_ports*/, const PortNumbers & /*updated_output_ports*/) { return prepare(); }
+    virtual Status prepare(const PortNumbers & /*updated_input_ports*/, const PortNumbers & /*updated_output_ports*/) {
+        return prepare();
+    }
 
     /** You may call this method if 'prepare' returned Ready.
       * This method cannot access any ports. It should use only data that was prepared by 'prepare' method.

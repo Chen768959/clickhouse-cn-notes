@@ -4474,7 +4474,7 @@ void StorageReplicatedMergeTree::read(
     * 2. Do not read parts that have not yet been written to the quorum of the replicas.
     * For this you have to synchronously go to ZooKeeper.
     */
-    if (local_context->getSettingsRef().select_sequential_consistency)
+    if (local_context->getSettingsRef().select_sequential_consistency)// 默认未false
     {
         auto max_added_blocks = std::make_shared<ReplicatedMergeTreeQuorumAddedParts::PartitionIdToMaxBlock>(getMaxAddedBlocks());
         if (auto plan = reader.read(

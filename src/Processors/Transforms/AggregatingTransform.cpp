@@ -412,6 +412,7 @@ AggregatingTransform::AggregatingTransform(
 
 AggregatingTransform::~AggregatingTransform() = default;
 
+// 通过该方法从上一个Transform处获取chunk，每一个partition的chunk分不同线程处理
 IProcessor::Status AggregatingTransform::prepare()
 {
     /// There are one or two input ports.
@@ -490,10 +491,12 @@ IProcessor::Status AggregatingTransform::prepare()
 
 void AggregatingTransform::work()
 {
-    if (is_consume_finished)
+    if (is_consume_finished)// 所有上游chunk全部消费完毕
+        // 当
         initGenerate();
-    else
+    else// 消费上游chunk
     {
+        // 调用每一列的聚合函数，聚合chunk中的每一列，得到该chunk的中间结果
         consume(std::move(current_chunk));
         read_current_chunk = false;
     }
@@ -533,6 +536,8 @@ void AggregatingTransform::consume(Chunk chunk)
     }
     else
     {
+        // 遍历chunk中每一列的每一行，调用每一列的聚合方法处理列的每一行数据，将聚合结果写入variants中
+        // 将param之中指定的key列与聚合列的指针作为参数提取出来，并且和聚合函数一起封装到AggregateFunctionInstructions的结构之中。
         if (!params->aggregator.executeOnBlock(chunk.detachColumns(), num_rows, variants, key_columns, aggregate_columns, no_more_keys))
             is_consume_finished = true;
     }
@@ -576,10 +581,15 @@ void AggregatingTransform::initGenerate()
     if (many_data->num_finished.fetch_add(1) + 1 < many_data->variants.size())
         return;
 
+    // 当所有的chunk都消费并初步聚合完后，进入此逻辑
+    // 至此所有chunk的初步聚合均已完成，接下来还需要把各个初步聚合结果进行merge
     if (!params->aggregator.hasTemporaryFiles())
     {
+        // 为接下来的merge准备数据
         auto prepared_data = params->aggregator.prepareVariantsToMerge(many_data->variants);
         auto prepared_data_ptr = std::make_shared<ManyAggregatedDataVariants>(std::move(prepared_data));
+        // 将算子加入执行链中
+        // 该算子作用：将之前的所有chunk的初步聚合结果，再转化成一个单一chunk结构，供后续使用。
         processors.emplace_back(std::make_shared<ConvertingAggregatedToChunksTransform>(params, std::move(prepared_data_ptr), max_threads));
     }
     else

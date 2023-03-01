@@ -84,6 +84,9 @@
 #include <common/scope_guard_safe.h>
 #include <memory>
 
+#include <Common/JSONBuilder.h>
+#include <Formats/FormatSettings.h>
+#include <Formats/FormatFactory.h>
 
 namespace DB
 {
@@ -266,11 +269,11 @@ static bool shouldIgnoreQuotaAndLimits(const StorageID & table_id)
 InterpreterSelectQuery::InterpreterSelectQuery(
     const ASTPtr & query_ptr_,
     ContextPtr context_,
-    const BlockInputStreamPtr & input_,
-    std::optional<Pipe> input_pipe_,
-    const StoragePtr & storage_,
+    const BlockInputStreamPtr & input_,// 由InterpreterFactory创建时入参为 nullptr
+    std::optional<Pipe> input_pipe_,// 由InterpreterFactory创建时入参为 nullptr
+    const StoragePtr & storage_,// 由InterpreterFactory创建时入参为 nullptr
     const SelectQueryOptions & options_,
-    const Names & required_result_column_names,
+    const Names & required_result_column_names,// 由InterpreterFactory创建时入参为 空列表
     const StorageMetadataPtr & metadata_snapshot_)
     /// NOTE: the query almost always should be cloned because it will be modified during analysis.
     : IInterpreterUnionOrSelectQuery(options_.modify_inplace ? query_ptr_ : query_ptr_->clone(), context_, options_)
@@ -293,12 +296,12 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             ErrorCodes::TOO_DEEP_SUBQUERIES);
 
     bool has_input = input || input_pipe;
-    if (input)
+    if (input)// 由InterpreterFactory创建时为 nullptr
     {
         /// Read from prepared input.
         source_header = input->getHeader();
     }
-    else if (input_pipe)
+    else if (input_pipe)// 由InterpreterFactory创建时为 nullptr
     {
         /// Read from prepared input.
         source_header = input_pipe->getHeader();
@@ -312,9 +315,11 @@ InterpreterSelectQuery::InterpreterSelectQuery(
         ApplyWithSubqueryVisitor().visit(query_ptr);
     }
 
+    // 从sql ast中获取database和table
     JoinedTables joined_tables(getSubqueryContext(context), getSelectQuery(), options.with_all_cols);
 
     bool got_storage_from_query = false;
+    // 初始化获取storage
     if (!has_input && !storage)
     {
         storage = joined_tables.getLeftTableStorage();
@@ -357,6 +362,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             source_header = interpreter_subquery->getSampleBlock();
     }
 
+    // 根据distributed_product_mode不同，重写分布式表的in or join语句
     joined_tables.rewriteDistributedInAndJoins(query_ptr);
 
     max_streams = settings.max_threads;
@@ -381,7 +387,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
         if (view)
             view->replaceWithSubquery(getSelectQuery(), view_table, metadata_snapshot);
 
-        // 对ast进行优化，包括提取公共子查询、where下移以提前过滤等，最终将优化后的ast树包装并返回
+        // 从ast中解析出“查询所需列名”、“聚合函数”、“窗口函数”、“别名列的对照map”
         syntax_analyzer_result = TreeRewriter(context).analyzeSelect(
             query_ptr,
             TreeRewriterResult(source_header.getNamesAndTypesList(), storage, metadata_snapshot),
@@ -393,6 +399,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
             query.setFinal();
 
         /// Save scalar sub queries's results in the query context
+        // 将sql中的标量-子查询 存入上下文
         if (!options.only_analyze && context->hasQueryContext())
             for (const auto & it : syntax_analyzer_result->getScalars())
                 context->getQueryContext()->addScalar(it.first, it.second);
@@ -418,6 +425,9 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                 current_info.query = query_ptr;
                 current_info.syntax_analyzer_result = syntax_analyzer_result;
 
+                /**
+                 * 构建PREWHERE，并装入current_info
+                 */
                 MergeTreeWhereOptimizer{
                     current_info,
                     context,
@@ -435,6 +445,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                 ASTSelectQuery::Expression::WHERE, makeASTFunction("and", query.prewhere()->clone(), query.where()->clone()));
         }
 
+        // 该对象可构建action
         query_analyzer = std::make_unique<SelectQueryExpressionAnalyzer>(
             query_ptr,
             syntax_analyzer_result,
@@ -903,7 +914,7 @@ static bool hasWithTotalsInAnySubqueryInFromClause(const ASTSelectQuery & query)
     return false;
 }
 
-// 根据ast对象解析并制定查询计划并装入query_plan对象
+// 根据ast对象以及对应的expressions，来确定sql的每一步step计划，并装入query_plan对象
 void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInputStreamPtr & prepared_input, std::optional<Pipe> prepared_pipe)
 {
     /** Streams of data. When the query is executed in parallel, we have several data streams.
@@ -994,14 +1005,24 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
         {
             auto prepared_source_step
                 = std::make_unique<ReadFromPreparedSource>(Pipe(std::make_shared<SourceFromInputStream>(prepared_input)), context);
+            // 将prepared_input作为root节点
             query_plan.addStep(std::move(prepared_source_step));
         }
         else if (prepared_pipe)
         {
             auto prepared_source_step = std::make_unique<ReadFromPreparedSource>(std::move(*prepared_pipe), context);
+            // 将prepared_source_step作为root节点
             query_plan.addStep(std::move(prepared_source_step));
         }
 
+        /**
+         * from_stage由interpreter初始化时定义
+         * from_stage = storage->getQueryProcessingStage(context, options.to_stage, metadata_snapshot, query_info);
+         * 一般情况下from_stage为 QueryProcessingStage::FetchColumns
+         *
+         * 若查询distributed表，则一般返回QueryProcessingStage::WithMergeableState，
+         * 若同时使用distributed_group_by_no_merge参数，则返回QueryProcessingStage::Complete
+         */
         if (from_stage == QueryProcessingStage::WithMergeableState &&
             options.to_stage == QueryProcessingStage::WithMergeableState)
             intermediate_stage = true;
@@ -1015,13 +1036,16 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             to_aggregation_stage = true;
 
         /// Read the data from Storage. from_stage - to what stage the request was completed in Storage.
-        // 从本地存储读取数据
+        // 一般情况为最底层step，通过不同引擎的storage对象从本地磁盘读取目标数据，或者发送请求从远程表读取目标数据。
+        // 为plan添加初始step，该step-pan可能是count()计算 或 子查询 或 本地磁盘读取 或 远程读取
         executeFetchColumns(from_stage, query_plan);
 
         LOG_TRACE(log, "{} -> {}", QueryProcessingStage::toString(from_stage), QueryProcessingStage::toString(options.to_stage));
     }
 
-    if (options.to_stage > QueryProcessingStage::FetchColumns)// 目标阶段数要大于本地磁盘存储阶段，则继续进行
+    // 目标阶段数要大于本地磁盘存储阶段，则继续进行
+    // 根据expressions解析出的sql逻辑，继续判断需要往plan中增加那些step
+    if (options.to_stage > QueryProcessingStage::FetchColumns)
     {
         auto preliminary_sort = [&]()
         {
@@ -1061,7 +1085,6 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             }
         };
 
-        // stage逻辑正确性验证
         if (intermediate_stage)
         {
             if (expressions.first_stage || expressions.second_stage)
@@ -1072,12 +1095,16 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                 executeMergeAggregated(query_plan, aggregate_overflow_row, aggregate_final);
             }
         }
+
         if (from_aggregation_stage)
         {
             if (intermediate_stage || expressions.first_stage || expressions.second_stage)
                 throw Exception("Query with after aggregation stage cannot have any other stages", ErrorCodes::LOGICAL_ERROR);
         }
 
+        // first_stage默认false
+        // 在interpreter初始化时由以下逻辑进行赋值
+        // bool first_stage = from_stage < QueryProcessingStage::WithMergeableState && options.to_stage >= QueryProcessingStage::WithMergeableState;
         if (expressions.first_stage)
         {
             // If there is a storage that supports prewhere, this will always be nullptr
@@ -1174,7 +1201,9 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             if (expressions.need_aggregate)
             {
                 executeAggregation(
-                    query_plan, expressions.before_aggregation, aggregate_overflow_row, aggregate_final, query_info.input_order_info);
+                    query_plan, expressions.before_aggregation
+                    , aggregate_overflow_row, aggregate_final
+                    , query_info.input_order_info);
                 /// We need to reset input order info, so that executeOrder can't use  it
                 query_info.input_order_info.reset();
             }
@@ -1223,6 +1252,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             }
         }
 
+        // second_stage = from_stage <= QueryProcessingStage::WithMergeableState && options.to_stage > QueryProcessingStage::WithMergeableState;
         if (expressions.second_stage || from_aggregation_stage)
         {
             if (from_aggregation_stage)
@@ -1323,17 +1353,13 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
                     && !expressions.need_aggregate
                     && !expressions.has_window
                     && !(query.group_by_with_totals && !aggregate_final)){
-                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeMergeSorted");
                     executeMergeSorted(query_plan, "for ORDER BY, without aggregation");
-                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeMergeSorted");
                 }
                 else{/// Otherwise, just sort.
-                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeOrder");
                     executeOrder(
                             query_plan,
                             query_info.input_order_info ? query_info.input_order_info
                                                         : (query_info.projection ? query_info.projection->input_order_info : nullptr));
-                    LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeOrder");
                 }
             }
 
@@ -1365,9 +1391,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             bool limit_applied = false;
             if (apply_prelimit)
             {
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executePreLimit");
                 executePreLimit(query_plan, /* do_not_skip_offset= */!apply_offset);
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executePreLimit");
                 limit_applied = true;
             }
 
@@ -1375,33 +1399,23 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
               * then DISTINCT needs to be performed once again after merging all streams.
               */
             if (query.distinct){
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_dist）START executeDistinct");
                 executeDistinct(query_plan, false, expressions.selected_columns, false);
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，combine_dist）END executeDistinct");
             }
 
 
             if (expressions.hasLimitBy())
             {
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，limit_before）START executeExpression");
                 executeExpression(query_plan, expressions.before_limit_by, "Before LIMIT BY");
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，limit_before）END executeExpression");
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeLimitBy");
                 executeLimitBy(query_plan);
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeLimitBy");
             }
 
-            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeWithFill");
             executeWithFill(query_plan);
-            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeWithFill");
 
             /// If we have 'WITH TIES', we need execute limit before projection,
             /// because in that case columns from 'ORDER BY' are used.
             if (query.limit_with_ties && apply_offset)
             {
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，with_ties）START executeLimit");
                 executeLimit(query_plan);
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage，with_ties）END executeLimit");
                 limit_applied = true;
             }
 
@@ -1410,15 +1424,11 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             if (!to_aggregation_stage)
             {
                 /// We must do projection after DISTINCT because projection may remove some columns.
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeProjection");
                 executeProjection(query_plan, expressions.final_projection);
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeProjection");
             }
 
             /// Extremes are calculated before LIMIT, but after LIMIT BY. This is Ok.
-            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeExtremes");
             executeExtremes(query_plan);
-            LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeExtremes");
 
             /// Limit is no longer needed if there is prelimit.
             ///
@@ -1427,24 +1437,27 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             /// This is the case for various optimizations for distributed queries,
             /// and when LIMIT cannot be applied it will be applied on the initiator anyway.
             if (apply_limit && !limit_applied && apply_offset){
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeLimit");
                 executeLimit(query_plan);
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeLimit");
             }
 
             if (apply_offset){
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）START executeOffset");
                 executeOffset(query_plan);
-                LOG_TRACE(log, "CUSTOM_TRACE （second_stage）END executeOffset");
             }
 
         }
     }
 
+    DB::FormatSettings format_settings;
+    JSONBuilder::FormatSettings json_format_settings{.settings = format_settings};
+    WriteBufferFromOwnString buf;
+    JSONBuilder::FormatContext format_context{.out = buf};
+    QueryPlan::ExplainPlanOptions query_plan_opts;
+    auto explain = query_plan.explainPlan(query_plan_opts);
+    explain->format(json_format_settings,format_context);
+    LOG_TRACE(log, "CUSTOM_TRACE executeImpl plan：{}",buf.str());
+
     if (!subqueries_for_sets.empty() && (expressions.hasHaving() || query_analyzer->hasGlobalSubqueries())){
-        LOG_TRACE(log, "CUSTOM_TRACE （final）START executeSubqueriesInSetsAndJoins");
         executeSubqueriesInSetsAndJoins(query_plan, subqueries_for_sets);
-        LOG_TRACE(log, "CUSTOM_TRACE （final）END executeSubqueriesInSetsAndJoins");
     }
 }
 
@@ -1512,6 +1525,7 @@ static void executeMergeAggregatedImpl(
 
     auto transform_params = std::make_shared<AggregatingTransformParams>(params, final);
 
+    // 调用具体聚合函数的"merge()"方法，将多个aggregate结果 再进行聚合
     auto merging_aggregated = std::make_unique<MergingAggregatedStep>(
         query_plan.getCurrentDataStream(),
         std::move(transform_params),
@@ -1787,7 +1801,7 @@ void InterpreterSelectQuery::addPrewhereAliasActions()
     }
 }
 
-// 根据该解释器初始化时生成的物理计划，来执行读取原始数据的物理计划
+// 为plan添加初始step，该step-pan可能是count()计算 或 子查询 或 本地磁盘读取 或 远程读取
 void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum processing_stage, QueryPlan & query_plan)
 {
     // 获取优化过后的ast树
@@ -1795,7 +1809,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
     const Settings & settings = context->getSettingsRef();
 
     /// Optimization for trivial query like SELECT count() FROM table.
-    // 是否存在count()查询，且该count()查询是否满足优化前提条件
+    // 是否存在count()查询，且该count()查询是否满足优化前提条件，且当前属于FetchColumns阶段
     bool optimize_trivial_count =
         syntax_analyzer_result->optimize_trivial_count
         && (settings.max_parallel_replicas <= 1)
@@ -1807,7 +1821,8 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         && (query_analyzer->aggregates().size() == 1)
         && typeid_cast<const AggregateFunctionCount *>(query_analyzer->aggregates()[0].function.get());
 
-    // 首先判断当前是否是count聚合查询，且是否符合优化条件，符合的话进入以下优化查询逻辑，最后直接给出结果
+    // 首先判断当前是否是count聚合查询，且是否符合优化条件.
+    // 满足条件的话，则查询出count结果，并作为source step装入plan
     if (optimize_trivial_count)
     {
         // 在创建当前解析器时，就已经根据ast树解析出所有aggregateDesc并装入队列，此处获取队列中的首个aggregateDesc
@@ -1834,6 +1849,7 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
 
         if (num_rows)
         {
+            // 获取count聚合函数对象
             const AggregateFunctionCount & agg_count = static_cast<const AggregateFunctionCount &>(*func);
 
             /// We will process it up to "WithMergeableState".
@@ -1842,10 +1858,11 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
 
             agg_count.create(place);
             SCOPE_EXIT_MEMORY_SAFE(agg_count.destroy(place));
-
+            // 将count数设置进place
             agg_count.set(place, *num_rows);
 
             auto column = ColumnAggregateFunction::create(func);
+            // 调用AggregateFunctionCount.merge()，merge count总数
             column->insertFrom(place);
 
             Block header = analysis_result.before_aggregation->getResultColumns();
@@ -1857,11 +1874,12 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
             Block block_with_count{
                 {std::move(column), std::make_shared<DataTypeAggregateFunction>(func, argument_types, desc.parameters), desc.column_name}};
 
+            // 将count结果作为一个初始阶段放入plan，跳出方法
             auto istream = std::make_shared<OneBlockInputStream>(block_with_count);
             auto prepared_count = std::make_unique<ReadFromPreparedSource>(Pipe(std::make_shared<SourceFromInputStream>(istream)), context);
             prepared_count->setStepDescription("Optimized trivial count");
             query_plan.addStep(std::move(prepared_count));
-            from_stage = QueryProcessingStage::WithMergeableState;
+            from_stage = QueryProcessingStage::WithMergeableState;// 更新当前阶段tag
             analysis_result.first_stage = false;
             return;
         }
@@ -1933,8 +1951,9 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
     {
         /// Prepared input.
     }
-    // （当前解释器初始化时设置）
+    // （当前解释器初始化时判断，sql中是否包含子查询逻辑，如果存在则设置此“子查询interpreter”）
     // 数据源为子查询
+    // 交由interpreter_subquery构建query_plan
     else if (interpreter_subquery)
     {
         /// Subquery.
@@ -1956,7 +1975,8 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         interpreter_subquery->buildQueryPlan(query_plan);
         query_plan.addInterpreterContext(context);
     }
-    // 数据源为本地存储
+    // 如果以上条件都不满足，
+    // 则使用对应表引擎的storage.read 进一步创建step-plan，根据引擎的不同，有可能是直接读取本地磁盘的plan，也有可能是转发远程请求的plan。
     else if (storage)
     {
         /// Table.
@@ -2032,6 +2052,8 @@ void InterpreterSelectQuery::executeFetchColumns(QueryProcessingStage::Enum proc
         if (!options.ignore_quota && (options.to_stage == QueryProcessingStage::Complete))
             quota = context->getQuota();
 
+        // interpreter初始化时就根据表名加载了对应的storage对象，
+        // 此处通过各种表引擎的storage对象read方法将“读取本地文件逻辑step”添加到plan中，也可能还会提前添加where、groupby等逻辑step
         storage->read(query_plan, required_columns, metadata_snapshot, query_info, context, processing_stage, max_block_size, max_streams);
 
         if (context->hasQueryContext() && !options.is_internal)

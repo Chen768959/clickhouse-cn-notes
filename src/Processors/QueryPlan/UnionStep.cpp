@@ -39,9 +39,11 @@ UnionStep::UnionStep(DataStreams input_streams_, size_t max_threads_)
 
 QueryPipelinePtr UnionStep::updatePipeline(QueryPipelines pipelines, const BuildQueryPipelineSettings &)
 {
+    // 准备一个全新的空pipeline
     auto pipeline = std::make_unique<QueryPipeline>();
     QueryPipelineProcessorsCollector collector(*pipeline, this);
 
+    // 不存在子节点source step pipelines，直接返回空pipeline
     if (pipelines.empty())
     {
         pipeline->init(Pipe(std::make_shared<NullSource>(output_stream->header)));
@@ -64,6 +66,7 @@ QueryPipelinePtr UnionStep::updatePipeline(QueryPipelines pipelines, const Build
                 ActionsDAG::MatchColumnsMode::Name);
 
             auto converting_actions = std::make_shared<ExpressionActions>(std::move(converting_dag));
+            // 给每一个子节点的pipeline设置Transform函数
             cur_pipeline->addSimpleTransform([&](const Block & cur_header)
             {
                 return std::make_shared<ExpressionTransform>(cur_header, converting_actions);

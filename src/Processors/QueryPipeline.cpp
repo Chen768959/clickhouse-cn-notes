@@ -216,6 +216,7 @@ void QueryPipeline::setOutputFormat(ProcessorPtr output)
     initRowsBeforeLimit();
 }
 
+// union所有子节点pipeline
 QueryPipeline QueryPipeline::unitePipelines(
     std::vector<std::unique_ptr<QueryPipeline>> pipelines,
     size_t max_threads_limit,

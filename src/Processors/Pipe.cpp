@@ -320,6 +320,8 @@ Pipe Pipe::unitePipes(Pipes pipes, Processors * collected_processors, bool allow
     res.collected_processors = collected_processors;
     res.header = getCommonHeader(pipes);
 
+    // 某个step-plan node的子节点的pipe。一般为source的。
+    // 遍历每一个子节点pipe
     for (auto & pipe : pipes)
     {
         if (!allow_empty_header || pipe.header)

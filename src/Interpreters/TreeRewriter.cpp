@@ -967,6 +967,7 @@ TreeRewriterResultPtr TreeRewriter::analyzeSelect(
         collectJoinedColumns(*result.analyzed_join, table_join_ast, tables_with_columns, result.aliases);
     }
 
+    // 从query中获取并遍历出所有的agg ast function聚合函数对象，装入队列并返回。
     result.aggregates = getAggregates(query, *select_query);
     result.window_function_asts = getWindowFunctions(query, *select_query);
     result.collectUsedColumns(query, true);

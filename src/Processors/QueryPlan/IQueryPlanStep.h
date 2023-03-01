@@ -80,6 +80,7 @@ public:
     ///   * header from each pipeline is the same as header from corresponding input_streams
     /// Result pipeline must contain any number of streams with compatible output header is hasOutputStream(),
     ///   or pipeline should be completed otherwise.
+    // 将当前step转化为pipeline，pipelines为当前step子节点的pipelines
     virtual QueryPipelinePtr updatePipeline(QueryPipelines pipelines, const BuildQueryPipelineSettings & settings) = 0;
 
     const DataStreams & getInputStreams() const { return input_streams; }

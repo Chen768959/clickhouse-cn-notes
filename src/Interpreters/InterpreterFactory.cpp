@@ -102,12 +102,14 @@ std::unique_ptr<IInterpreter> InterpreterFactory::get(ASTPtr & query, ContextMut
     // 创建ast对应解析器
     if (query->as<ASTSelectQuery>())
     {
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE InterpreterFactory->ASTSelectQuery IN ");
         /// This is internal part of ASTSelectWithUnionQuery.
         /// Even if there is SELECT without union, it is represented by ASTSelectWithUnionQuery with single ASTSelectQuery as a child.
         return std::make_unique<InterpreterSelectQuery>(query, context, options);
     }
     else if (query->as<ASTSelectWithUnionQuery>())
     {
+        LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE InterpreterFactory->ASTSelectWithUnionQuery IN ");
         ProfileEvents::increment(ProfileEvents::SelectQuery);
         return std::make_unique<InterpreterSelectWithUnionQuery>(query, context, options);
     }

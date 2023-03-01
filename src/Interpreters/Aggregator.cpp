@@ -928,6 +928,7 @@ bool Aggregator::executeOnBlock(Columns columns, UInt64 num_rows, AggregatedData
     /// We select one of the aggregation methods and call it.
 
     /// For the case when there are no keys (all aggregate into one row).
+    // 调用executeWithoutKeyImpl()或executeImpl()
     if (result.type == AggregatedDataVariants::Type::without_key)
     {
         executeWithoutKeyImpl(result.without_key, num_rows, aggregate_functions_instructions.data(), result.aggregates_pool);

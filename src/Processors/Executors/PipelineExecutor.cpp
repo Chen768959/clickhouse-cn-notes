@@ -198,6 +198,13 @@ bool PipelineExecutor::tryAddProcessorToStackIfUpdated(ExecutingGraph::Edge & ed
 }
 
 /**
+ * 执行*graph->nodes[pid].processor （Transform）算子的prepare()方法（该方法会从上游算子的inputPort中获取chunk数据块）
+ * 并获取当前的算子状态，
+ * 如果算子状态为Ready，则还会将该算子交由queue队列中，等待后续交由线程触发work逻辑
+ *
+ * 调用graph中Transform算子的prepare方法，获取当前该算子的”状态“，
+ * 根据算子状态的不同，附以不同的node状态，
+ * 如果算子状态为Ready，则将该node交予线程队列，执行该node中算子的work逻辑。
  *
  * @param pid 从graph中获取该pid index 的node
  * @param thread_number unknow
@@ -495,6 +502,11 @@ void PipelineExecutor::executeSingleThread(size_t thread_num, size_t num_threads
 }
 
 /**
+ * 当前逻辑由线程池异步执行。
+ * 从task_queue队列中获取待执行的node节点，（prepareProcessor()方法遍历整个graph图中的每一个node，并prepare()处理完后将需要执行的node放入此task_queue队列）
+ * 执行该node中processor(Transorm算子)的work()逻辑，执行完毕后继续循环执行该node后续node中算子的work逻辑。
+ * （算子的work()逻辑包含了算子针对prepare消费到的chunk的逻辑处理，也就是说每一个算子的work都用来处理上一个算子的输出数据。）
+ *
  * 单线程查询会进入此处，
  * 多线程并发查询也是并发执行此处
  * @param thread_num 当前线程在整个线程队列中的index下标位置

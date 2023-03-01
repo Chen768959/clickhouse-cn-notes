@@ -134,8 +134,10 @@ QueryPlanPtr MergeTreeDataSelectExecutor::read(
 {
     const auto & settings = context->getSettingsRef();
     auto parts = data.getDataPartsVector();
+    // 没有使用“投影”功能，则进入if
     if (!query_info.projection)
     {
+        // 构建从parts文件读取数据的step-plan
         auto plan = readFromParts(
             parts,
             column_names_to_return,
