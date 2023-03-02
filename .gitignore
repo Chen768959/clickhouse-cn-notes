@@ -154,7 +154,6 @@ website/package-lock.json
 *.iml
 out
 gen
-/tests/
 /contrib/
 /.github/
 /cmake-build-debug/
