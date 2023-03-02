@@ -155,7 +155,6 @@ website/package-lock.json
 out
 gen
 /tests/
-/cmake/
 /contrib/
 /.github/
 /cmake-build-debug/
