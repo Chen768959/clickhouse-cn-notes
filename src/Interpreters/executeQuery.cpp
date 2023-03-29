@@ -578,11 +578,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
             OpenTelemetrySpanHolder span("IInterpreter::execute()");
             /**
              * 执行interpreter解释器，根据ast优化后树生成物理计划“pipeline”
-             * （此处并未执行该物理计划）
              */
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE interpreter->execute() start");
             res = interpreter->execute();
-            LOG_DEBUG(&Poco::Logger::get("Parser"),"CUSTOM_TRACE interpreter->execute() end ");
         }
 
         // 后续所有逻辑都是按照此pipeline执行
@@ -1152,6 +1149,10 @@ void executeQuery(
             }
 
             {
+                /**
+                 * 创建pipeline的executor（executor中包含了该pipeline的所有processors（transform算子））
+                 * 再执行executor
+                 */
                 auto executor = pipeline.execute();
                 executor->execute(pipeline.getNumThreads());
             }

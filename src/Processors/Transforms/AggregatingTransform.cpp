@@ -404,7 +404,7 @@ AggregatingTransform::AggregatingTransform(
     , key_columns(params->params.keys_size)
     , aggregate_columns(params->params.aggregates_size)
     , many_data(std::move(many_data_))
-    , variants(*many_data->variants[current_variant])
+    , variants(*many_data->variants[current_variant])// 将当前AggregatingTransform算子的variants，装入“many_data”的variants队列中
     , max_threads(std::min(many_data->variants.size(), max_threads_))
     , temporary_data_merge_threads(temporary_data_merge_threads_)
 {
@@ -491,12 +491,25 @@ IProcessor::Status AggregatingTransform::prepare()
 
 void AggregatingTransform::work()
 {
-    if (is_consume_finished)// 所有上游chunk全部消费完毕
-        // 当
+    if (is_consume_finished)
+        /**
+         * 内部会判断所有chunk是否都完成了“预聚合”
+         */
         initGenerate();
-    else// 消费上游chunk
+    else
     {
-        // 调用每一列的聚合函数，聚合chunk中的每一列，得到该chunk的中间结果
+        /**
+         * 整个消费过程是以partition为单位进行的（存在多少partition（包含还未即使合并的partition），上游就会生成多少chunk对象）。
+         * 以一个partition为例：
+         * 该partition中存在多少行目标数据，chunk中就会包含多少行，此次聚合涉及几列，chunk里面就有几列。
+         *
+         * 然后触发executeOnBlock()方法：
+         * 遍历chunk中每一列的每一行，调用每一列的聚合方法，对每一列的所有行进行预聚合
+         *
+         * 最后再将“is_consume_finished”标识设置为true，下次再进来时就会进入上面的initGenerate逻辑
+         * 有多少partition，就重复上述步骤几次。
+         *
+         */
         consume(std::move(current_chunk));
         read_current_chunk = false;
     }
@@ -578,14 +591,19 @@ void AggregatingTransform::initGenerate()
             params->aggregator.writeToTemporaryFile(variants);
     }
 
+    // many_data是所有AggregatingTransform节点共享的
+    // many_data->variants是个list<variants>，其中包含了所有chunk的variants结果，
+    // 在每个AggregatingTransform算子对象创建时，都会将自己的variants放入many_data->variants中
+    // many_data->variants队列的总大小是由"处理AggregatingTransform算子的线程数“决定的
+    // 此处逻辑就相当于是：“当前线程针对聚合算子chunk的预聚合已完成，many_data->num_finished数原子加一，然后和many_data->variants.size做判断，看是否所有的聚合算子线程都处理完毕了，没处理完毕则直接return”
     if (many_data->num_finished.fetch_add(1) + 1 < many_data->variants.size())
         return;
 
-    // 当所有的chunk都消费并初步聚合完后，进入此逻辑
-    // 至此所有chunk的初步聚合均已完成，接下来还需要把各个初步聚合结果进行merge
+    // 当所有的聚合算子线程均预聚合完毕后，进入此逻辑，接下来还需要把各个初步聚合结果进行merge
     if (!params->aggregator.hasTemporaryFiles())
     {
         // 为接下来的merge准备数据
+        // many_data->variants中包含了所有线程的聚合算子的variants结果
         auto prepared_data = params->aggregator.prepareVariantsToMerge(many_data->variants);
         auto prepared_data_ptr = std::make_shared<ManyAggregatedDataVariants>(std::move(prepared_data));
         // 将算子加入执行链中

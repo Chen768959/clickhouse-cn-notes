@@ -41,6 +41,7 @@ void optimizeTree(const QueryPlanOptimizationSettings & settings, QueryPlan::Nod
 
     while (!stack.empty())
     {
+        // 从上至下遍历plan树的每一个节点
         auto & frame = stack.top();
 
         /// If traverse_depth_limit == 0, then traverse without limit (first entrance)

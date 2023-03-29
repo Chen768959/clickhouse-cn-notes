@@ -46,6 +46,7 @@ AggregatingStep::AggregatingStep(
 {
 }
 
+// 将plan(step)转化成pipeline链时调用
 void AggregatingStep::transformPipeline(QueryPipeline & pipeline, const BuildQueryPipelineSettings &)
 {
     QueryPipelineProcessorsCollector collector(pipeline, this);

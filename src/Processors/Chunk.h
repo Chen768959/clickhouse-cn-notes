@@ -30,7 +30,7 @@ using ChunkInfoPtr = std::shared_ptr<const ChunkInfo>;
 **/
 
 // 包含了实际的数据。
-// 包含了n行m列数据
+// 包含了n列数据
 class Chunk
 {
 public:

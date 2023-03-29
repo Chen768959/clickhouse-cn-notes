@@ -445,7 +445,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
                 ASTSelectQuery::Expression::WHERE, makeASTFunction("and", query.prewhere()->clone(), query.where()->clone()));
         }
 
-        // 该对象可构建action
+        // 该对象解析出sql中的各种“潜在规则”，然后将这些规则作用于后续interpreter创建pipeline时的构建逻辑
         query_analyzer = std::make_unique<SelectQueryExpressionAnalyzer>(
             query_ptr,
             syntax_analyzer_result,
@@ -1021,7 +1021,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
          * 一般情况下from_stage为 QueryProcessingStage::FetchColumns
          *
          * 若查询distributed表，则一般返回QueryProcessingStage::WithMergeableState，
-         * 若同时使用distributed_group_by_no_merge参数，则返回QueryProcessingStage::Complete
+         * 若同时使用distributed_group_by_no_merge=1参数，则返回QueryProcessingStage::Complete
          */
         if (from_stage == QueryProcessingStage::WithMergeableState &&
             options.to_stage == QueryProcessingStage::WithMergeableState)
@@ -1035,6 +1035,8 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
         if (options.to_stage >= QueryProcessingStage::WithMergeableStateAfterAggregation)
             to_aggregation_stage = true;
 
+
+        // storage->read============================================================================================================================================
         /// Read the data from Storage. from_stage - to what stage the request was completed in Storage.
         // 一般情况为最底层step，通过不同引擎的storage对象从本地磁盘读取目标数据，或者发送请求从远程表读取目标数据。
         // 为plan添加初始step，该step-pan可能是count()计算 或 子查询 或 本地磁盘读取 或 远程读取
@@ -1085,6 +1087,7 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, const BlockInpu
             }
         };
 
+        // 需要组合不同服务器上的处理结果的阶段。（StorageDistributed没有distributed_group_by_no_merge参数的情况下，storage都会决定当前stage为intermediate_stage）
         if (intermediate_stage)
         {
             if (expressions.first_stage || expressions.second_stage)
@@ -2167,7 +2170,6 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         : static_cast<size_t>(settings.max_threads);
 
     bool storage_has_evenly_distributed_read = storage && storage->hasEvenlyDistributedRead();
-
     auto aggregating_step = std::make_unique<AggregatingStep>(
         query_plan.getCurrentDataStream(),
         params,

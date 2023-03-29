@@ -490,7 +490,7 @@ void PipelineExecutor::wakeUpExecutor(size_t thread_num)
 }
 
 // 单线程查询会进入此处，
-// 多线程并发查询也是并发执行此处
+// 多线程并发查询也是线程池中每个线程执行此处
 void PipelineExecutor::executeSingleThread(size_t thread_num, size_t num_threads)
 {
     executeStepImpl(thread_num, num_threads);
@@ -508,7 +508,7 @@ void PipelineExecutor::executeSingleThread(size_t thread_num, size_t num_threads
  * （算子的work()逻辑包含了算子针对prepare消费到的chunk的逻辑处理，也就是说每一个算子的work都用来处理上一个算子的输出数据。）
  *
  * 单线程查询会进入此处，
- * 多线程并发查询也是并发执行此处
+ * 多线程并发查询也是线程池中每个线程执行此处
  * @param thread_num 当前线程在整个线程队列中的index下标位置
  * @param num_threads 并发度，也是线程队列总数
  * @param yield_flag null
@@ -829,7 +829,7 @@ void PipelineExecutor::executeImpl(size_t num_threads)
         }
     );
 
-    // 主逻辑
+    // 主逻辑 单线程则直接调用"executeSingleThread()"，多线程则创建线程池，线程池中每条线程执行"executeSingleThread()"
     if (num_threads > 1)
     {
         auto thread_group = CurrentThread::getGroup();

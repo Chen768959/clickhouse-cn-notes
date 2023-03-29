@@ -32,6 +32,10 @@ protected:
     /// This allows to escape caching chunks in input port, which can lead to uneven data distribution.
     bool set_input_not_needed_after_read = true;
 
+    // “需由子类实现，每个子类可借由此方法，对input chunk本身做一个处理。然后Simple算子会将处理后的chunk交由output”
+    // SimpleTransform的work()方法会将input的chunk传入此transform中
+    // 子类的transform()方法对 input chunk 处理后
+    // SimpleTransform再将input chunk直接作为output的chunk传输出去
     virtual void transform(Chunk &)
     {
         throw Exception("Method transform is not implemented for " + getName(), ErrorCodes::NOT_IMPLEMENTED);

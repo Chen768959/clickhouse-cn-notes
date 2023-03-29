@@ -139,6 +139,7 @@ QueryPipelinePtr QueryPlan::buildQueryPipeline(
     const BuildQueryPipelineSettings & build_pipeline_settings)
 {
     checkInitialized();
+    // “优化”queryPlan树（主要就是判断树深度有没有超限制，以及limit与filter能不能提前）
     optimize(optimization_settings);
 
     struct Frame
