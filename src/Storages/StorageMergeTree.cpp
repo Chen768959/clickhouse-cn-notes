@@ -407,10 +407,12 @@ Int64 StorageMergeTree::startMutation(const MutationCommands & commands, String 
         entry.commit(version);
         mutation_file_name = entry.file_name;
         auto insertion = current_mutations_by_id.emplace(mutation_file_name, std::move(entry));
+        // 将mutation任务放入map中等待调度执行
         current_mutations_by_version.emplace(version, insertion.first->second);
 
         LOG_INFO(log, "Added mutation: {}", mutation_file_name);
     }
+    // 触发异步任务
     background_executor.triggerTask();
     return version;
 }
@@ -492,8 +494,10 @@ void StorageMergeTree::waitForMutation(Int64 version, const String & file_name)
 void StorageMergeTree::mutate(const MutationCommands & commands, ContextPtr query_context)
 {
     String mutation_file_name;
+    // 触发异步任务
     Int64 version = startMutation(commands, mutation_file_name);
 
+    // 等待任务完成
     if (query_context->getSettingsRef().mutations_sync > 0)
         waitForMutation(version, mutation_file_name);
 }
@@ -1026,6 +1030,9 @@ bool StorageMergeTree::mutateSelectedPart(const StorageMetadataPtr & metadata_sn
 
     try
     {
+        // 将future_part分区读入内存作为一个临时分区。
+        // 根据mutation中的update语句，修改内存中的分区数据。
+        // 最后写回临时分区
         new_part = merger_mutator.mutatePartToTemporaryPart(
             future_part, metadata_snapshot, merge_mutate_entry.commands, *(merge_list_entry),
             time(nullptr), getContext(), merge_mutate_entry.tagger->reserved_space, table_lock_holder);

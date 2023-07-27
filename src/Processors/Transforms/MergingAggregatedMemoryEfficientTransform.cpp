@@ -344,6 +344,7 @@ void MergingAggregatedBucketTransform::transform(Chunk & chunk)
 
     auto block = params->aggregator.mergeBlocks(blocks_list, params->final);
     size_t num_rows = block.rows();
+    // 用merge结果重新填充chunk
     chunk.setColumns(block.getColumns(), num_rows);
 }
 

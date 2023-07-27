@@ -2132,27 +2132,32 @@ ManyAggregatedDataVariants Aggregator::prepareVariantsToMerge(ManyAggregatedData
     return non_empty_data;
 }
 
+// no_more_keys：false
 template <bool no_more_keys, typename Method, typename Table>
 void NO_INLINE Aggregator::mergeStreamsImplCase(
     Block & block,
     Arena * aggregates_pool,
-    Method & method [[maybe_unused]],
-    Table & data,
+    Method & method [[maybe_unused]], // example：AggregationMethodOneNumber<UInt64, AggregatedDataWithUInt64Key>
+    Table & data, // 临时结果集，Map类型，列如AggregatedDataWithUInt64Key 。example：AggregationMethodOneNumber<UInt64, AggregatedDataWithUInt64Key> ->data
     AggregateDataPtr overflow_row) const
 {
     ColumnRawPtrs key_columns(params.keys_size);
     AggregateColumnsConstData aggregate_columns(params.aggregates_size);
 
     /// Remember the columns we will work with
+    // 将block中各column的指针存入key_columns数组中
     for (size_t i = 0; i < params.keys_size; ++i)
         key_columns[i] = block.safeGetByPosition(i).column.get();
 
+    // 获取block中每个聚合函数待merge处理的column
     for (size_t i = 0; i < params.aggregates_size; ++i)
     {
         const auto & aggregate_column_name = params.aggregates[i].column_name;
         aggregate_columns[i] = &typeid_cast<const ColumnAggregateFunction &>(*block.getByName(aggregate_column_name).column).getData();
     }
 
+    // AggregationMethodOneNumber.ColumnsHashing::HashMethodOneNumber
+    // 这个state类似一个“方法工具”，后续可以借助则个“方法工具”里面的各个方法，将key_columns与map对象进行一些逻辑操作
     typename Method::State state(key_columns, key_sizes, aggregation_state_cache);
 
     /// For all rows.
@@ -2163,10 +2168,13 @@ void NO_INLINE Aggregator::mergeStreamsImplCase(
     {
         AggregateDataPtr aggregate_data = nullptr;
 
-        if (!no_more_keys)
+        if (!no_more_keys)// ! false
         {
+            // ColumnsHashing::HashMethodOneNumber.emplaceKey
+            // 借助state中的emplaceKey()，将key_columns.getKeyHolder(row, pool)得到的KeyHolder作为key 再搭配一个空的Data::LookupResult作为value，将这组k-v存入data这个map中
+            //
             auto emplace_result = state.emplaceKey(data, i, *aggregates_pool);
-            if (emplace_result.isInserted())
+            if (emplace_result.isInserted())// false
             {
                 emplace_result.setMapped(nullptr);
 
@@ -2191,12 +2199,13 @@ void NO_INLINE Aggregator::mergeStreamsImplCase(
         places[i] = value;
     }
 
+    // 用每一个聚合函数进行merge
     for (size_t j = 0; j < params.aggregates_size; ++j)
     {
         /// Merge state of aggregate functions.
         aggregate_functions[j]->mergeBatch(
             rows, places.get(), offsets_of_aggregate_states[j],
-            aggregate_columns[j]->data(),
+            aggregate_columns[j]->data(),// 各聚合函数处理的column
             aggregates_pool);
     }
 
@@ -2208,10 +2217,10 @@ template <typename Method, typename Table>
 void NO_INLINE Aggregator::mergeStreamsImpl(
     Block & block,
     Arena * aggregates_pool,
-    Method & method,
-    Table & data,
+    Method & method, // example：AggregationMethodOneNumber<UInt64, AggregatedDataWithUInt64Key>
+    Table & data, // 临时结果集。example：AggregationMethodOneNumber<UInt64, AggregatedDataWithUInt64Key> ->data
     AggregateDataPtr overflow_row,
-    bool no_more_keys) const
+    bool no_more_keys) const // false
 {
     if (!no_more_keys)
         mergeStreamsImplCase<false>(block, aggregates_pool, method, data, overflow_row);
@@ -2500,6 +2509,7 @@ Block Aggregator::mergeBlocks(BlocksList & blocks, bool final)
     result.keys_size = params.keys_size;
     result.key_sizes = key_sizes;
 
+    // 遍历每一个block，并将其merge到result中
     for (Block & block : blocks)
     {
         if (bucket_num >= 0 && block.info.bucket_num != bucket_num)
@@ -2508,6 +2518,7 @@ Block Aggregator::mergeBlocks(BlocksList & blocks, bool final)
         if (result.type == AggregatedDataVariants::Type::without_key || is_overflows)
             mergeWithoutKeyStreamsImpl(block, result);
 
+        // 将block merge进result
     #define M(NAME, IS_TWO_LEVEL) \
         else if (result.type == AggregatedDataVariants::Type::NAME) \
             mergeStreamsImpl(block, result.aggregates_pool, *result.NAME, result.NAME->data, nullptr, false);

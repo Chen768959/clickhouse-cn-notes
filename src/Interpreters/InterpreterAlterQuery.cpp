@@ -106,6 +106,7 @@ BlockIO InterpreterAlterQuery::execute()
                                                          "to execute ALTERs of different types in single query");
     }
 
+    // update语句属于mutation_commands类型
     if (!mutation_commands.empty())
     {
         table->checkMutationIsPossible(mutation_commands, getContext()->getSettingsRef());
