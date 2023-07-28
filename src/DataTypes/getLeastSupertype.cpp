@@ -394,6 +394,12 @@ DataTypePtr getLeastSupertype(const DataTypes & types)
                 what = value;
         };
 
+        /**
+         * 找到不同数值类型之间的公共范围，
+         * 如UInt32与Int32，其公共范围就为Int64
+         * 不过也有特例，
+         * UInt64与Int64之间不会进行升阶成Int128，因为Int128或256的计算速度很慢，此处不会轻易升阶，而是会报错。
+         */
         for (const auto & type : types)
         {
             if (typeid_cast<const DataTypeUInt8 *>(type.get()))
@@ -435,7 +441,6 @@ DataTypePtr getLeastSupertype(const DataTypes & types)
 
             /// If there are signed and unsigned types of same bit-width, the result must be signed number with at least one more bit.
             /// Example, common of Int32, UInt32 = Int64.
-
             size_t min_bit_width_of_integer = std::max(max_bits_of_signed_integer, max_bits_of_unsigned_integer);
 
             /// If unsigned is not covered by signed.
