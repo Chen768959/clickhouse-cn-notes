@@ -239,7 +239,10 @@ ASTPtr tryParseQuery(
     Tokens tokens(query_begin, all_queries_end, max_query_size);
     // 创建token_iterator迭代器
     // token_iterator迭代器每次可迭代Token对象
-    // token_iterator将从tokens中借助lexer的逻辑，从begin_pos指针开始，遍历所有sql字符，并这些字符都包装成Token对象，再返回出这些Token对象。
+    // token_iterator将从tokens中借助lexer的逻辑，从begin_pos指针开始，遍历所有sql字符，并将sql“进行一定规则的切割”，比如：
+    // 空格不会被放到token中，空格会作为切分标准，来分隔其他字符串为单独token，
+    // 特殊字符也会被当成单独token，比如括号和逗号（但是双引号不会被当token）
+    // 列名，表名等也都会被当成单独token
     IParser::Pos token_iterator(tokens, max_parser_depth);
 
     // 如果sql的首字符为空，或者是分号，则表示此次查询没有sql
@@ -261,7 +264,7 @@ ASTPtr tryParseQuery(
 
     Expected expected;
     ASTPtr res;
-    // parser为ParserQuery，由executeQuery初始定义
+    // parser为ParserQuery.cpp，由executeQuery初始定义，该parser也是所有parser的顶层父parser，所有sql都会先进入此parser开始解析流程。
     // 利用各个parser对象解析sql，最终得到树状结构的ast对象，并将对象赋值给res
     const bool parse_res = parser.parse(token_iterator, res, expected);
 
