@@ -309,7 +309,7 @@ void TCPHandler::runImpl()
 
             bool may_have_embedded_data = client_tcp_protocol_version >= DBMS_MIN_REVISION_WITH_CLIENT_SUPPORT_EMBEDDED_DATA;
             /// Processing Query
-            // 获取查询对应物理计划
+            // 获取此次sql请求的物理计划（pipeline）
             LOG_TRACE(log, "CUSTOM_TRACE START TCPH executeQuery");
             state.io = executeQuery(state.query, query_context, false, state.stage, may_have_embedded_data);
             LOG_TRACE(log, "CUSTOM_TRACE END TCPH executeQuery");
@@ -319,6 +319,7 @@ void TCPHandler::runImpl()
             after_check_cancelled.restart();
             after_send_progress.restart();
 
+            // 以下各个process方法总的目的都是执行pipeline中的各个processes，区别就是有的是单线程执行，有的会启用线程池并发执行。
             if (state.io.out)
             {
                 state.need_receive_data_for_insert = true;
@@ -331,6 +332,7 @@ void TCPHandler::runImpl()
                 executor->execute(state.io.pipeline.getNumThreads());
             }
             else if (state.io.pipeline.initialized()){// 一般情况下的主要运行逻辑
+                // 执行pipeline中的各个算子
                 processOrdinaryQueryWithProcessors();
             }
             else if (state.io.in){
@@ -674,6 +676,7 @@ void TCPHandler::processOrdinaryQuery()
 void TCPHandler::processOrdinaryQueryWithProcessors()
 {
     // interpreter解释器中创建的物理计划
+    // 后续会依次执行pipeline.processors中的各个算子的具体逻辑
     auto & pipeline = state.io.pipeline;
 
     if (query_context->getSettingsRef().allow_experimental_query_deduplication)
@@ -696,7 +699,7 @@ void TCPHandler::processOrdinaryQueryWithProcessors()
         Block block;
         /**
          * 异步执行chunk的查询，并设置超时时间，期间各种交互都通过executor进行
-         * 查询结果会相应到block中
+         * 查询结果会写到block中
          *
          */
         while (executor.pull(block, query_context->getSettingsRef().interactive_delay / 1000))
