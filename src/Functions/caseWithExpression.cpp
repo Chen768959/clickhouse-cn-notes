@@ -45,6 +45,8 @@ public:
         return getLeastSupertype(dst_array_types);
     }
 
+    // 处理case when语法逻辑，
+    // 本质上是调用FunctionTransform来处理
     ColumnPtr executeImpl(const ColumnsWithTypeAndName & args, const DataTypePtr & result_type, size_t input_rows_count) const override
     {
         if (args.empty())

@@ -146,6 +146,9 @@ public:
         }
     }
 
+    // 处理类似case when的语法，
+    // 将arguments[0] 与 arguments[1]进行匹配，如果可以匹配上，则返回arguments[2]中的对应项，如果匹配不上，则返回arguments[3]
+    // 只支持Num与String类型的转换
     ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count) const override
     {
         const ColumnConst * array_from = checkAndGetColumnConst<ColumnArray>(arguments[1].column.get());
